@@ -1,239 +1,182 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Dec  1 14:47:57 2020
+Created on Tue Mar 15 22:13:05 2022
 
-@author: Wei-Hsiang, Shen
+@author: benzener
 """
-
-import numpy as np
 import tensorflow as tf
+import complexnn
 import os
-import matplotlib.pyplot as plt
+from complexnn.activation import cReLU, cLeakyReLU, ctanh, zReLU, modReLU
+from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE
 
+class Model():
+    
+    def __init__(self,
+                 filters=16,
+                 size=3,
+                 batch_size=2,
+                 lr=1e-4,
+                 epochs=2,
+                 validation_split=0.2,
+                 activations=None,
+                 losses=None,
+                 apply_batchnorm=True,
+                 dropout_rate=None):
+        self.filters = filters
+        self.size = size
+        self.batch_size = batch_size
+        self.lr = lr
+        self.epochs = epochs
+        self.validation_rate = validation_split
+        self.activations = activations
+        self.losses = losses
+        self.apply_batchnorm = apply_batchnorm
+        self.dropout_rate = dropout_rate
+        
+        self.input_shape = None
+        self.forward = False
+        self.input_shape = (256,256,2)
+    
+    def __call__(self, x, y):
+        # check input is forward or not forward and get input_shape
+        if isinstance(x,list):
+            self.input_shape = x[0].shape[1:]
+            self.forward = True
+        else:
+            self.input_shape = x.shape[1:]
+        model = self.build_model()
+        history = model.fit(x, y,
+                            validation_split=self.validation_rate,
+                            batch_size=self.batch_size,
+                            verbose=2,
+                            epochs=self.epochs)
+        return model, history
+        
+    def build_model(self):
+        # determine activation function
+        if self.activations in {'cReLU', 'cLeakyReLU', 'ctanh', 'zReLU', 'modReLU'}:
+            self.activations = {
+                'cReLU': cReLU,
+                'cLeakyReLU': cLeakyReLU,
+                'ctanh': ctanh,
+                'zReLU': zReLU,
+                'modReLU': modReLU}[self.activations]
+        else:
+            self.activations = cLeakyReLU
+        
+        # determine loss function 
+        if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE'}:
+            self.losses = {
+                'ComplexRMS': ComplexRMS,
+                'ComplexMAE': ComplexMAE,
+                'ComplexMSE': ComplexMSE
+                }[self.losses]
+        else:
+            self.losses = ComplexMSE
+        
+        model = self.UNet()
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr), loss=self.losses)
+        model.summary()
+        return model
+            
+    def downsample(self, filters, size):
+        result = tf.keras.Sequential()
+        result.add(
+            complexnn.conv_test.ComplexConv2D(filters, size, strides=2, padding='same', use_bias=False)
+            )
+        if self.apply_batchnorm:
+            result.add(complexnn.bn_test.ComplexBatchNormalization())
+        
+        result.add(self.activations())
+        result.add(complexnn.conv_test.ComplexConv2D(filters, size, padding='same', use_bias=False))
+        if self.apply_batchnorm:
+            result.add(complexnn.bn_test.ComplexBatchNormalization())
+        result.add(self.activations())
+        return result
 
-from dataset import GetDS
-
-def downsample(filters, size, apply_batchnorm=True):
-  initializer = tf.random_normal_initializer(0., 0.02)
-
-  result = tf.keras.Sequential()
-  result.add(
-      tf.keras.layers.Conv2D(filters, size, strides=2, padding='same',
-                             kernel_initializer=initializer, use_bias=False))
-
-  if apply_batchnorm:
-    result.add(tf.keras.layers.BatchNormalization())
-
-  result.add(tf.keras.layers.LeakyReLU())
-  
-  # another conv layer
-  result.add(tf.keras.layers.Conv2D(filters, 3, padding='same', use_bias=False))
-  if apply_batchnorm:
-    result.add(tf.keras.layers.BatchNormalization())
-  result.add(tf.keras.layers.LeakyReLU())
-
-  return result
-
-def upsample(filters, size, apply_dropout=False):
-  initializer = tf.random_normal_initializer(0., 0.02)
-
-  result = tf.keras.Sequential()
-  result.add(
-    tf.keras.layers.Conv2DTranspose(filters, size, strides=2,
-                                    padding='same',
-                                    kernel_initializer=initializer,
-                                    use_bias=False))
-
-  result.add(tf.keras.layers.BatchNormalization())
-
-  if apply_dropout:
-      result.add(tf.keras.layers.Dropout(0.5))
-
-  result.add(tf.keras.layers.ReLU())
-  
-  # another conv layer
-  result.add(tf.keras.layers.Conv2D(filters, 3, padding='same', use_bias=False))
-  result.add(tf.keras.layers.BatchNormalization())
-  result.add(tf.keras.layers.LeakyReLU())
-
-  return result
-
-def UNet(INPUT_CHANNELS = 1, OUTPUT_CHANNELS = 1, input_size=(256,256)):
-  inputs = tf.keras.layers.Input(shape=[input_size[0], input_size[1], INPUT_CHANNELS])
-
-  down_stack = [
-    downsample(64, 4, apply_batchnorm=False), # (bs, 128, 128, 64)
-    downsample(128, 4), # (bs, 64, 64, 128)
-    downsample(256, 4), # (bs, 32, 32, 256)
-    downsample(512, 4), # (bs, 16, 16, 512)
-    downsample(1024, 4), # (bs, 8, 8, 512)
-    downsample(1024, 4), # (bs, 4, 4, 512)
-    # downsample(512, 4), # (bs, 2, 2, 512)
-    # downsample(512, 4), # (bs, 1, 1, 512)
-  ]
-
-  up_stack = [
-    # upsample(512, 4, apply_dropout=True), # (bs, 2, 2, 1024)
-    # upsample(512, 4, apply_dropout=True), # (bs, 4, 4, 1024)
-    upsample(1024, 4), # (bs, 8, 8, 1024)
-    upsample(512, 4), # (bs, 16, 16, 1024)
-    upsample(256, 4), # (bs, 32, 32, 512)
-    upsample(128, 4), # (bs, 64, 64, 256)
-    upsample(64, 4), # (bs, 128, 128, 128)
-  ]
-
-  initializer = tf.random_normal_initializer(0., 0.02)
-  last = tf.keras.layers.Conv2DTranspose(32, 4,
-                                         strides=2,
-                                         padding='same',
-                                         kernel_initializer=initializer,
-                                         activation='tanh') # (bs, 256, 256, 3)
-
-  x = inputs
-  
-  if input_size[0] == 192*2:
-      x = downsample(32, 4)(x)
-
-  # Downsampling through the model
-  skips = []
-  for down in down_stack:
-    x = down(x)
-    skips.append(x)
-
-  skips = reversed(skips[:-1])
-
-  # Upsampling and establishing the skip connections
-  for up, skip in zip(up_stack, skips):
-    x = up(x)
-    x = tf.keras.layers.Concatenate()([x, skip])
-
-  x = last(x)
-  
-  for _ in range(3):
-      x = tf.keras.layers.Conv2D(32, 3, padding='same', use_bias=False)(x)
-      x = tf.keras.layers.BatchNormalization()(x)
-      x = tf.keras.layers.LeakyReLU()(x)
-  
-  x = tf.keras.layers.Conv2D(OUTPUT_CHANNELS, 3, padding='same', use_bias=False)(x)
-  x = tf.keras.layers.BatchNormalization()(x)
-  # x = tf.keras.activations.tanh(x)
-  x = tf.keras.layers.LeakyReLU()(x)
-
-  return tf.keras.Model(inputs=inputs, outputs=x)
-
-def UNetF(INPUT_CHANNELS = 1, OUTPUT_CHANNELS = 1, input_size=(256,256)):
-  inputs = tf.keras.layers.Input(shape=[input_size[0], input_size[1], INPUT_CHANNELS])
-  inputs_forward = tf.keras.layers.Input(shape=[input_size[0], input_size[1], INPUT_CHANNELS])
-
-  down_stack = [
-    downsample(64, 4, apply_batchnorm=False), # (bs, 128, 128, 64)
-    downsample(128, 4), # (bs, 64, 64, 128)
-    downsample(256, 4), # (bs, 32, 32, 256)
-    downsample(512, 4), # (bs, 16, 16, 512)
-    downsample(1024, 4), # (bs, 8, 8, 512)
-    downsample(1024, 4), # (bs, 4, 4, 512)
-    # downsample(512, 4), # (bs, 2, 2, 512)
-    # downsample(512, 4), # (bs, 1, 1, 512)
-  ]
-
-  up_stack = [
-    # upsample(512, 4, apply_dropout=True), # (bs, 2, 2, 1024)
-    # upsample(512, 4, apply_dropout=True), # (bs, 4, 4, 1024)
-    upsample(1024, 4), # (bs, 8, 8, 1024)
-    upsample(512, 4), # (bs, 16, 16, 1024)
-    upsample(256, 4), # (bs, 32, 32, 512)
-    upsample(128, 4), # (bs, 64, 64, 256)
-    upsample(64, 4), # (bs, 128, 128, 128)
-  ]
-
-  initializer = tf.random_normal_initializer(0., 0.02)
-  last = tf.keras.layers.Conv2DTranspose(32, 4,
-                                         strides=2,
-                                         padding='same',
-                                         kernel_initializer=initializer,
-                                         activation='tanh') # (bs, 256, 256, 3)
-
-  x = inputs
-  
-  if input_size[0] == 192*2:
-      x = downsample(32, 4)(x)
-
-  # Downsampling through the model
-  skips = []
-  for down in down_stack:
-    x = down(x)
-    skips.append(x)
-
-  skips = reversed(skips[:-1])
-
-  # Upsampling and establishing the skip connections
-  for up, skip in zip(up_stack, skips):
-    x = up(x)
-    x = tf.keras.layers.Concatenate()([x, skip])
-
-  x = last(x)
-  
-  for _ in range(3):
-      x = tf.keras.layers.Conv2D(32, 3, padding='same', use_bias=False)(x)
-      x = tf.keras.layers.BatchNormalization()(x)
-      x = tf.keras.layers.LeakyReLU()(x)
-      
-  x = tf.keras.layers.Conv2D(2, 3, padding='same', use_bias=False)(x)
-  x = tf.keras.layers.BatchNormalization()(x)
-  # x = tf.keras.activations.tanh(x)
-  x = tf.keras.layers.LeakyReLU()(x)
-  
-  # forward input
-  x = tf.keras.layers.Concatenate(axis=-1)((x, inputs_forward))
-  x = tf.keras.layers.Conv2D(OUTPUT_CHANNELS, 3, padding='same', use_bias=False)(x)
-  x = tf.keras.layers.BatchNormalization()(x)
-  x = tf.keras.layers.LeakyReLU()(x)
-
-  return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
+    def upsample(self, filters, size):
+        result = tf.keras.Sequential()
+        result.add(
+            complexnn.conv_test.ComplexConv2D(filters, size, strides=2, padding='same',
+                                              transposed=True)
+            )
+        result.add(complexnn.bn_test.ComplexBatchNormalization())
+        if self.dropout_rate:
+            result.add(tf.keras.layers.Dropout(self.dropout_rate))
+        result.add(self.activations())
+        result.add(complexnn.conv_test.ComplexConv2D(filters, size, padding='same', use_bias=False))
+        result.add(complexnn.bn_test.ComplexBatchNormalization())
+        result.add(self.activations())
+        return result
+        
+    def UNet(self):
+        inputs = tf.keras.layers.Input(self.input_shape)
+        if self.forward:
+            inputs_forward = tf.keras.layers.Input(self.input_shape)
+        down_stack = [
+            self.downsample(4*self.filters, self.size), #(bs, 128, 128, 32*2)
+            self.downsample(8*self.filters, self.size),  #(bs, 64, 64, 64*2)
+            self.downsample(16*self.filters, self.size),  #(bs, 32, 32, 128*2)
+            self.downsample(32*self.filters, self.size),  #(bs, 16, 16, 256*2)
+            self.downsample(64*self.filters, self.size), #(bs, 8, 8, 512*2)
+            self.downsample(64*self.filters, self.size), #(bs, 8, 8, 512*2)
+            ]
+        up_stack = [
+            self.upsample(64*self.filters, self.size), #(bs, 8, 8, 512*2)
+            self.upsample(32*self.filters, self.size), #(bs, 8, 8, 512*2)
+            self.upsample(16*self.filters, self.size),  #(bs, 16, 16, 256*2)
+            self.upsample(8*self.filters, self.size),  #(bs, 32, 32, 128*2)
+            self.upsample(4*self.filters, self.size),  #(bs, 64, 64, 64*2)
+            ]
+        last = complexnn.conv_test.ComplexConv2D(2*self.filters, self.size, strides=2, padding='same',
+                                          transposed=True) #(bs, 256, 256, 16*2)
+        x = inputs
+    
+        
+        skips = []
+        for down in down_stack:
+            x = down(x)
+            skips.append(x)
+        
+        skips = reversed(skips[:-1])
+        
+        for up, skip in zip(up_stack, skips):
+            x = up(x)
+            x = tf.keras.layers.Concatenate()([x, skip])
+        x = last(x)
+        x = self.activations()(x)
+          
+        for _ in range(3):
+            x = complexnn.conv_test.ComplexConv2D(2*self.filters, self.size, padding='same', use_bias=False)(x)
+            x = complexnn.bn_test.ComplexBatchNormalization()(x)
+            x = self.activations()(x)
+        x = complexnn.conv_test.ComplexConv2D(1, self.size, padding='same', use_bias=False)(x)
+        x = complexnn.bn_test.ComplexBatchNormalization()(x)
+    
+        
+        if self.forward:
+            x = self.activations()(x)
+            x = tf.keras.layers.Concatenate(axis=-1)((x, inputs_forward))
+            x = complexnn.conv_test.ComplexConv2D(1, self.size, padding='same', use_bias=False)(x)
+            x = complexnn.bn_test.ComplexBatchNormalization()(x)
+            x = ctanh()(x)
+            return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
+        else:    
+            x = ctanh()(x)
+            return tf.keras.Model(inputs=inputs, outputs=x)
 
 if __name__ == '__main__':
-    # %% standard UNet
-    model = UNet()
-    tf.keras.utils.plot_model(model, show_shapes=True, dpi=64)
-    
-    train_ds, val_ds = GetDS()
-    
-    for patch, psf in train_ds.take(1):
-        pred = model(patch)
-    
-    plt.figure(dpi=300)
-    plt.imshow(patch[0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    plt.figure(dpi=300)
-    plt.imshow(psf[0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    plt.figure(dpi=300)
-    plt.imshow(pred[0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    # %% Forward UNet
-    model = UNetF()
-    
-    train_ds, val_ds = GetDS(forward_flag=True)
-    
-    for patch, psf in train_ds.take(1):
-        pred = model(patch)
-    
-    plt.figure(dpi=300)
-    plt.imshow(patch[0][0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    plt.figure(dpi=300)
-    plt.imshow(patch[1][0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    plt.figure(dpi=300)
-    plt.imshow(psf[0,:,:,0], cmap='gray')
-    plt.colorbar()
-    
-    plt.figure(dpi=300)
-    plt.imshow(pred[0,:,:,0], cmap='gray')
-    plt.colorbar()
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    tf.config.experimental.set_memory_growth(gpus[0], True)
+    x = tf.random.normal((10,256,256,2),dtype=tf.float32)
+    y = tf.random.normal((10,256,256,2),dtype=tf.float32)
+    mymodel = Model()
+    # model, history = mymodel(x,y)
+
+        
+        
+        
+        
+        
