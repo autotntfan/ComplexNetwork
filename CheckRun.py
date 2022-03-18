@@ -40,8 +40,8 @@ input_shapes = x_train.shape[1:]
 InputTensor = tf.keras.Input(shape=input_shapes)
 conv1 = complexnn.conv_test.ComplexConv2D(64,(3,3),padding='same',strides=2)(InputTensor)
 conv2 = complexnn.conv_test.ComplexConv2D(128,(3,3),padding='same',strides=2)(conv1)
-conv2 = complexnn.bn_test.ComplexBatchNormalization()(conv2)
-conv3 = complexnn.conv_test.ComplexConv2D(128,(3,3),padding='same',strides=2,transposed=True)(conv2)
+conv3 = complexnn.conv_test.ComplexConv2D(128,(3,3),padding='same',activation='modReLU',strides=2,transposed=True)(conv2)
+
 Output= complexnn.conv_test.ComplexConv2D(64,(3,3),padding='same',strides=2,transposed=True)(conv3)
 model = tf.keras.Model(inputs=InputTensor,outputs=Output)
 model.compile(optimizer=tf.keras.optimizers.RMSprop(),loss=complexnn.loss.ComplexMSE)
