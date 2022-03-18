@@ -82,7 +82,7 @@ class DataPreprocessing():
                  path='D:\ComplexDataset\dataset.hdf5',
                  normalization=True,
                  forward=True,
-                 training_num=300):
+                 training_num=1000):
         '''
         Parameters
         ----------
@@ -120,26 +120,38 @@ class DataPreprocessing():
     def get_data(self):
         psf = self._read_data(dtype='psf')
         speckle = self._read_data(dtype='speckle')
+        # check number of training data is valid
         if self.training_num > psf.shape[0]:
             raise ValueError(f'training_num {self.training_num} is larger than data size {psf.shape[0]}')
+        # if applied normalizaion, data range is [1,-1]. Otherwise, data range is unchange.
         if self.normalization:
             psf = self._normalize_complex_value(psf)
             speckle = self._normalize_complex_value(speckle)
-        self.indices = np.arange(psf.shape[0])
-        np.random.shuffle(self.indices) # suffle order
+        # downsample 
         if self.factor:
             psf = self._reduce_sampling_rate(psf)
             speckle = self._reduce_sampling_rate(speckle)
-            
+        # shuffle randomly
+        self.indices = np.arange(psf.shape[0])
+        np.random.shuffle(self.indices) # suffle order    
+        # obtain training, testing data and associated target
         x_train = speckle[self.indices[:self.training_num]]
         y_train = psf[self.indices[:self.training_num]]
         x_test = speckle[self.indices[self.training_num:]]
         y_test = psf[self.indices[self.training_num:]]
+        assert x_train.shape[0] == self.training_num
+        np.save('x_train.npy', x_train)
+        np.save('y_train.npy', y_train)
+        np.save('x_test.npy', x_test)
+        np.save('y_test.npy', y_test)
+        # assign ideal psf for different level speckle
         if self.forward:
             ideal_psf = np.repeat(psf[::4],4,axis=0)
             assert ideal_psf.shape == psf.shape
             ideal_train = ideal_psf[self.indices[:self.training_num]]
             ideal_test = ideal_psf[self.indices[self.training_num:]]
+            np.save('ideal_train.npy', ideal_train)
+            np.save('ideal_test.npy', ideal_test)
             return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
         else:
             return (x_train, y_train), (x_test, y_test)
@@ -160,7 +172,6 @@ class DataPreprocessing():
                     data = img
                 else:
                     data = np.vstack((data,img))
-                    break
         return data
     
     def _normalize_complex_value(self, x):
