@@ -22,7 +22,8 @@ class Model():
                  activations=None,
                  losses=None,
                  apply_batchnorm=True,
-                 dropout_rate=None):
+                 dropout_rate=None,
+                 callbacks=None):
         self.filters = filters
         self.size = size
         self.batch_size = batch_size
@@ -33,6 +34,7 @@ class Model():
         self.losses = losses
         self.apply_batchnorm = apply_batchnorm
         self.dropout_rate = dropout_rate
+        self.callbacks = callbacks
         
         self.input_shape = None
         self.forward = False
@@ -50,7 +52,8 @@ class Model():
                             validation_split=self.validation_rate,
                             batch_size=self.batch_size,
                             verbose=2,
-                            epochs=self.epochs)
+                            epochs=self.epochs,
+                            callbacks=self.callbacks)
         return model, history
         
     def build_model(self):
@@ -166,14 +169,7 @@ class Model():
             x = ctanh()(x)
             return tf.keras.Model(inputs=inputs, outputs=x)
 
-if __name__ == '__main__':
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    tf.config.experimental.set_memory_growth(gpus[0], True)
-    x = tf.random.normal((10,256,256,2),dtype=tf.float32)
-    y = tf.random.normal((10,256,256,2),dtype=tf.float32)
-    mymodel = Model()
-    # model, history = mymodel(x,y)
+
 
         
         
