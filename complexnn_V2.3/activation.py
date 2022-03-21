@@ -68,14 +68,13 @@ class AmplitudeMaxout(Layer):
         imag_part = tf.reduce_max(imag_part*tf.cast(cond,dtype=tf.float32),axis=-1)    
         return real_part, imag_part
 
+
 class cReLU(Layer):
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
     
     def call(self, inputs):
-        real = get_realpart(inputs)
-        imag = get_imagpart(inputs)
-        return tf.concat([tf.nn.relu(real),tf.nn.relu(imag)], axis=-1)
+        return tf.nn.relu(inputs)
     
     def compute_output_shape(self, input_shape):
         return input_shape
@@ -85,9 +84,7 @@ class cLeakyReLU(Layer):
         super().__init__(**kwargs)
     
     def call(self, inputs):
-        real = get_realpart(inputs)
-        imag = get_imagpart(inputs)
-        return tf.concat([tf.nn.leaky_relu(real),tf.nn.leaky_relu(imag)], axis=-1)
+        return tf.nn.leaky_relu(inputs)
     
     def compute_output_shape(self, input_shape):
         return input_shape
@@ -97,13 +94,10 @@ class ctanh(Layer):
         super().__init__(**kwargs)
     
     def call(self, inputs):
-        real = get_realpart(inputs)
-        imag = get_imagpart(inputs)
-        return tf.concat([tf.nn.tanh(real),tf.nn.tanh(imag)], axis=-1)
+        return tf.nn.tanh(inputs)
     
     def compute_output_shape(self, input_shape):
         return input_shape
-
 
 class zReLU(Layer):
     def __init__(self, **kwargs):
@@ -176,6 +170,7 @@ class modReLU(Layer):
         self.b_factor = None
         
     def build(self, input_shape):
+        print(input_shape)
         self.b_factor = self.add_weight(shape=(input_shape[-1]//2,),
                                           name='b_factor',
                                           initializer='zeros',
@@ -185,12 +180,13 @@ class modReLU(Layer):
         real = get_realpart(inputs)
         imag = get_imagpart(inputs)
         modulus = tf.sqrt(tf.add(tf.pow(real,2),tf.pow(imag,2)))
+        
         '''
         ReLU(|z|+b)exp(i*theta) = ReLU(|z|+b)(cos(theta)+isin(theta))
         cos(theta) = Real_part/modulus, sin(theta) = Imag_part/modulus
         '''
-        real = tf.multiply(tf.divide_no_nan(real,modulus),tf.nn.relu(tf.add(modulus,self.b_factor)))
-        imag = tf.multiply(tf.divide_no_nan(imag,modulus),tf.nn.relu(tf.add(modulus,self.b_factor)))
+        real = tf.multiply(tf.math.divide_no_nan(real,modulus),tf.nn.relu(tf.add(modulus,self.b_factor)))
+        imag = tf.multiply(tf.math.divide_no_nan(imag,modulus),tf.nn.relu(tf.add(modulus,self.b_factor)))
         return tf.concat([real, imag], axis=-1)
  
     def get_config(self):

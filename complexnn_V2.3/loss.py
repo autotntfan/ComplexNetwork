@@ -12,7 +12,6 @@ import tensorflow.keras.backend as K
 
 def ComplexRMS(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    # n = _feature_size(y_pred)
     return tf.sqrt(tf.reduce_sum(_get_square_error(y_true, y_pred),axis=-1))
 '''
 n應為complex channel數量 即shape[-1]//2
@@ -20,12 +19,10 @@ n應為complex channel數量 即shape[-1]//2
 '''
 def ComplexMSE(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-#    n = _feature_size(y_pred) 
     return tf.reduce_sum(_get_square_error(y_true, y_pred),axis=-1)
 
 def ComplexMAE(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    # n = _feature_size(y_pred)
     return tf.reduce_sum(tf.sqrt(_get_square_error(y_true, y_pred)),axis=-1)
 
 
