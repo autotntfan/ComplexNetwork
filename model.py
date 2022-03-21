@@ -5,10 +5,14 @@ Created on Tue Mar 15 22:13:05 2022
 @author: benzener
 """
 import tensorflow as tf
-import complexnn
-import os
-from complexnn.activation import cReLU, cLeakyReLU, ctanh, zReLU, modReLU
+from complexnn.activation import cReLU, ctanh, zReLU, modReLU
 from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE
+from complexnn.conv_test import ComplexConv2D
+from complexnn.bn_test import ComplexBatchNormalization
+from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, BatchNormalization, Dropout, Concatenate, LeakyReLU
+from tensorflow.keras.losses import MeanSquaredError
+from tensorflow.keras.activations import tanh
+
 
 class Model():
     
@@ -19,11 +23,12 @@ class Model():
                  lr=1e-4,
                  epochs=2,
                  validation_split=0.2,
-                 activations=None,
-                 losses=None,
+                 activations='LeakyReLU',
+                 losses='ComplexMSE',
                  apply_batchnorm=True,
                  dropout_rate=None,
-                 callbacks=None):
+                 callbacks=None,
+                 complex_network=True):
         self.filters = filters
         self.size = size
         self.batch_size = batch_size
@@ -35,10 +40,12 @@ class Model():
         self.apply_batchnorm = apply_batchnorm
         self.dropout_rate = dropout_rate
         self.callbacks = callbacks
+        self.complex_network = complex_network
         
         self.input_shape = None
         self.forward = False
         self.input_shape = (256,256,2)
+        
     
     def __call__(self, x, y):
         # check input is forward or not forward and get input_shape
@@ -47,6 +54,12 @@ class Model():
             self.forward = True
         else:
             self.input_shape = x.shape[1:]
+            
+        if self.complex_network:
+            assert self.input_shape[-1] == 2
+        else:
+            assert self.input_shape[-1] == 1
+            
         model = self.build_model()
         history = model.fit(x, y,
                             validation_split=self.validation_rate,
@@ -58,25 +71,29 @@ class Model():
         
     def build_model(self):
         # determine activation function
-        if self.activations in {'cReLU', 'cLeakyReLU', 'ctanh', 'zReLU', 'modReLU'}:
+        if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU'}:
             self.activations = {
                 'cReLU': cReLU,
-                'cLeakyReLU': cLeakyReLU,
-                'ctanh': ctanh,
                 'zReLU': zReLU,
-                'modReLU': modReLU}[self.activations]
+                'modReLU': modReLU,
+                'LeakyReLU': LeakyReLU,
+                }[self.activations]
         else:
-            self.activations = cLeakyReLU
+            if isinstance(self.activations, str):
+                raise KeyError('activation function is not defined')
+
         
         # determine loss function 
-        if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE'}:
+        if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE', 'MSE'}:
             self.losses = {
                 'ComplexRMS': ComplexRMS,
                 'ComplexMAE': ComplexMAE,
-                'ComplexMSE': ComplexMSE
+                'ComplexMSE': ComplexMSE,
+                'MSE       ': MeanSquaredError
                 }[self.losses]
-        else:
-            self.losses = ComplexMSE
+            
+        self.convFunc = ComplexConv2D if self.complex_network else Conv2D
+        self.bnFunc = ComplexBatchNormalization if self.complex_network else BatchNormalization
         
         model = self.UNet()
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr), loss=self.losses)
@@ -84,39 +101,43 @@ class Model():
         return model
             
     def downsample(self, filters, size):
+        
         result = tf.keras.Sequential()
+
         result.add(
-            complexnn.conv_test.ComplexConv2D(filters, size, strides=2, padding='same', use_bias=False)
+            self.convFunc(filters, size, strides=2, padding='same', use_bias=False)
             )
         if self.apply_batchnorm:
-            result.add(complexnn.bn_test.ComplexBatchNormalization())
+            result.add(self.bnFunc())
         
         result.add(self.activations())
-        result.add(complexnn.conv_test.ComplexConv2D(filters, size, padding='same', use_bias=False))
+        result.add(self.convFunc(filters, size, padding='same', use_bias=False))
         if self.apply_batchnorm:
-            result.add(complexnn.bn_test.ComplexBatchNormalization())
+            result.add(self.bnFunc())
         result.add(self.activations())
         return result
 
     def upsample(self, filters, size):
+        
         result = tf.keras.Sequential()
-        result.add(
-            complexnn.conv_test.ComplexConv2D(filters, size, strides=2, padding='same',
-                                              transposed=True)
-            )
-        result.add(complexnn.bn_test.ComplexBatchNormalization())
+        
+        if self.complex_network:
+            result.add(self.convFunc(filters, size, strides=2, padding='same', transposed=True))
+        else:
+            result.add(Conv2DTranspose(filters, size, strides=2, padding='same'))
+        result.add(self.bnFunc())
         if self.dropout_rate:
-            result.add(tf.keras.layers.Dropout(self.dropout_rate))
+            result.add(Dropout(self.dropout_rate))
         result.add(self.activations())
-        result.add(complexnn.conv_test.ComplexConv2D(filters, size, padding='same', use_bias=False))
-        result.add(complexnn.bn_test.ComplexBatchNormalization())
+        result.add(self.convFunc(filters, size, padding='same', use_bias=False))
+        result.add(self.bnFunc())
         result.add(self.activations())
         return result
         
     def UNet(self):
-        inputs = tf.keras.layers.Input(self.input_shape)
+        inputs = Input(self.input_shape)
         if self.forward:
-            inputs_forward = tf.keras.layers.Input(self.input_shape)
+            inputs_forward = Input(self.input_shape)
         down_stack = [
             self.downsample(4*self.filters, self.size), #(bs, 128, 128, 32*2)
             self.downsample(8*self.filters, self.size),  #(bs, 64, 64, 64*2)
@@ -132,8 +153,10 @@ class Model():
             self.upsample(8*self.filters, self.size),  #(bs, 32, 32, 128*2)
             self.upsample(4*self.filters, self.size),  #(bs, 64, 64, 64*2)
             ]
-        last = complexnn.conv_test.ComplexConv2D(2*self.filters, self.size, strides=2, padding='same',
-                                          transposed=True) #(bs, 256, 256, 16*2)
+        if self.complex_network:
+            last = self.convFunc(2*self.filters, self.size, strides=2, padding='same', transposed=True) #(bs, 256, 256, 16*2)
+        else:
+            last = Conv2DTranspose(2*self.filters, self.size, strides=2, padding='same')
         x = inputs
     
         
@@ -146,28 +169,29 @@ class Model():
         
         for up, skip in zip(up_stack, skips):
             x = up(x)
-            x = tf.keras.layers.Concatenate()([x, skip])
+            x = Concatenate()([x, skip])
         x = last(x)
         x = self.activations()(x)
           
         for _ in range(3):
-            x = complexnn.conv_test.ComplexConv2D(2*self.filters, self.size, padding='same', use_bias=False)(x)
-            x = complexnn.bn_test.ComplexBatchNormalization()(x)
+            x = self.convFunc(2*self.filters, self.size, padding='same', use_bias=False)(x)
+            x = self.bnFunc()(x)
             x = self.activations()(x)
-        x = complexnn.conv_test.ComplexConv2D(1, self.size, padding='same', use_bias=False)(x)
-        x = complexnn.bn_test.ComplexBatchNormalization()(x)
+        x = self.convFunc(1, self.size, padding='same', use_bias=False)(x)
+        x = self.bnFunc()(x)
     
         
         if self.forward:
             x = self.activations()(x)
-            x = tf.keras.layers.Concatenate(axis=-1)((x, inputs_forward))
-            x = complexnn.conv_test.ComplexConv2D(1, self.size, padding='same', use_bias=False)(x)
-            x = complexnn.bn_test.ComplexBatchNormalization()(x)
-            x = ctanh()(x)
+            x = Concatenate(axis=-1)((x, inputs_forward))
+            x = self.convFunc(1, self.size, padding='same', use_bias=False)(x)
+            x = self.bnFunc()(x)
+            x = tanh(x)
             return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
         else:    
-            x = ctanh()(x)
+            x = tanh(x)
             return tf.keras.Model(inputs=inputs, outputs=x)
+
 
 
 
