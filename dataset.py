@@ -12,7 +12,7 @@ import h5py
 # -------------------- deal with .mat file --------------------
 class DealWithRawData():
     
-    def __init__(self, file_num=4, path='D:\ComplexDataset\simulation_straight'):
+    def __init__(self, file_num=4, path='simulation_straight'):
         self.file_num = file_num
         self.path = path
         
@@ -79,7 +79,7 @@ class DataPreprocessing():
     
     def __init__(self,
                  factor=2,
-                 path='D:\ComplexDataset\dataset.hdf5',
+                 path='dataset.hdf5',
                  normalization=True,
                  forward=True,
                  training_num=1000):
@@ -133,7 +133,8 @@ class DataPreprocessing():
             speckle = self._reduce_sampling_rate(speckle)
         # shuffle randomly
         self.indices = np.arange(psf.shape[0])
-        np.random.shuffle(self.indices) # suffle order    
+        rng = np.random.default_rng(7414)
+        rng.shuffle(self.indices) # suffle order       
         # obtain training, testing data and associated target
         x_train = speckle[self.indices[:self.training_num]]
         y_train = psf[self.indices[:self.training_num]]
@@ -146,8 +147,14 @@ class DataPreprocessing():
         np.save('y_test.npy', y_test)
         # assign ideal psf for different level speckle
         if self.forward:
-            ideal_psf = np.repeat(psf[::4],4,axis=0)
+            ideal_psf = None
+            for _ in range(4):
+                if ideal_psf is None:
+                    ideal_psf = psf[:psf.shape[0]//4]
+                else:
+                    ideal_psf = np.vstack([ideal_psf, psf[:psf.shape[0]//4]])
             assert ideal_psf.shape == psf.shape
+            assert (ideal_psf[0] == ideal_psf[400]).all()
             ideal_train = ideal_psf[self.indices[:self.training_num]]
             ideal_test = ideal_psf[self.indices[self.training_num:]]
             np.save('ideal_train.npy', ideal_train)
