@@ -5,6 +5,8 @@ Created on Tue Mar 15 22:13:05 2022
 @author: benzener
 """
 import tensorflow as tf
+import csv
+import os
 from complexnn.activation import cReLU, ctanh, zReLU, modReLU
 from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE
 from complexnn.conv_test import ComplexConv2D
@@ -12,13 +14,13 @@ from complexnn.bn_test import ComplexBatchNormalization
 from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, BatchNormalization, Dropout, Concatenate, LeakyReLU
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.activations import tanh
-
+from datetime import datetime
 
 class Model():
     
     def __init__(self,
                  filters=16,
-                 size=3,
+                 size=(3,3),
                  batch_size=2,
                  lr=1e-4,
                  epochs=2,
@@ -54,12 +56,7 @@ class Model():
             self.forward = True
         else:
             self.input_shape = x.shape[1:]
-            
-        if self.complex_network:
-            assert self.input_shape[-1] == 2
-        else:
-            assert self.input_shape[-1] == 1
-            
+        self.sanitized()          
         model = self.build_model()
         history = model.fit(x, y,
                             validation_split=self.validation_rate,
@@ -70,6 +67,7 @@ class Model():
         return model, history
         
     def build_model(self):
+        self.save_info()
         # determine activation function
         if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU'}:
             self.activations = {
@@ -89,7 +87,7 @@ class Model():
                 'ComplexRMS': ComplexRMS,
                 'ComplexMAE': ComplexMAE,
                 'ComplexMSE': ComplexMSE,
-                'MSE       ': MeanSquaredError
+                'MSE'       : MeanSquaredError()
                 }[self.losses]
             
         self.convFunc = ComplexConv2D if self.complex_network else Conv2D
@@ -192,6 +190,60 @@ class Model():
             x = tanh(x)
             return tf.keras.Model(inputs=inputs, outputs=x)
 
+    def sanitized(self):
+        if self.complex_network:
+            assert self.input_shape[-1] == 2
+            if self.losses not in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE'}:
+                raise KeyError('Invalid complex-valued loss function')
+            if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU'}:
+                raise  KeyError('Unsupported activation')
+        else:
+            assert self.input_shape[-1] == 1
+            if self.losses not in {'MSE'}:
+                raise KeyError('Invalid complex-valued loss function')
+            if self.activations not in {'LeakyReLU'}:
+                raise  KeyError('Unsupported activation')
+    
+    def generate_name(self):
+        type_ = 'complex' if self.complex_network else 'real'
+        forward = 'Notfoward' if self.forward else 'foward'
+        epochs = str(self.epochs)
+        return f'{type_}model_{forward}_{epochs}_{self.losses}_{self.activations}_'
+    
+    def save_info(self):
+        now = datetime.now()
+        day_month_year = now.strftime("%d%m%Y")
+        saved_var = {
+            'input_shape':self.input_shape,
+            'forward':self.forward,
+            'callback':self.callbacks,
+            'complex':self.complex_network,
+            'num_training':self.input_shape[0],
+            'validation_split':self.validation_rate,
+            'filters':self.filters,
+            'kernel_size':self.size,
+            'learning_rate':self.lr,
+            'batch_size':self.batch_size,
+            'epochs':self.epochs,
+            'activation':self.activations,
+            'loss':self.losses,
+            'savingtime':day_month_year
+            }
+        file_name = self.generate_name() + day_month_year
+        saved_dir = os.path.join(r'./modelinfo', file_name)
+        file_name = file_name + '_parameters.txt'
+        if not os.path.exists(saved_dir):
+            try:
+                os.mkdir(saved_dir)
+            except FileNotFoundError:
+                os.makedirs(saved_dir)
+        saved_path = os.path.join(saved_dir, file_name)
+        with open(saved_path, 'w') as f:
+            f.write(str(saved_var))
+        
+            
+            
+        
 
 
 
