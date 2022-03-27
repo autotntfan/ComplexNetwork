@@ -5,59 +5,66 @@ Created on Wed Mar 16 21:24:37 2022
 @author: benzener
 """
 
-from train_utils import check_data_range, show_fig, envelope_detection, set_env, get_custom_object, load_data
-from dataset import DataPreprocessing
+from train_utils import show_fig, set_env, get_custom_object, get_default, save_model
+from newdataset import DataPreprocessing, GetData
 from model import Model
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
-
 '''
     This file is main script running model and plotting outputs.
 '''
 
 
 LOAD_MODEL         = False    # whether load pretrained model, True or False
-FORWARD            = True   # whether use forward UNet or not, True or False
+FORWARD            = False   # whether use forward UNet or not, True or False
 CALLBACK           = False   # whether add callbacks in model fit, True or False
-COMPLEX            = True    # whether use complex- or real-valued network, True or False
+COMPLEX            = True  # whether use complex- or real-valued network, True or False
+USING_DEFAULT      = False
 
-TRAINING_NUM       = 1400    # number of training data, max:1600
-FILTERS            = 16      # number of filters for the shallowest conv2D layer
-SIZE               = 3       # size of each Conv2D kernel
-BATCH_SIZE         = 4       # mini-batch size
+NUM_TRAINING       = 1400    # number of training data, max:1600
+DECIMATION         = 2       # downsample factor
+FILTERS            = 8      # number of filters for the shallowest conv2D layer
+SIZE               = (3,6)    # size of each Conv2D kernel
+BATCH_SIZE         = 16       # mini-batch size
 LR                 = 1e-4    # learning rate of optimizer
-EPOCHS             = 50      # training epochs
+EPOCHS             = 200      # training epochs
 VALIDATION_SPLIT   = 0.2     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
 NFIG               = 3       # show the n-th fig of speckle, target, or prediction
 DR                 = 40      # dynamic range in dB
 
 ACTIVATION         = 'LeakyReLU'   # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
-LOSS               = 'ComplexMSE'         # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
+LOSS               = 'ComplexMSE'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
 
 # check and allow gpu memory to grow
 set_env()
+if USING_DEFAULT:
+    DECIMATION, SIZE, LOSS, BATCH_SIZE = get_default(COMPLEX)
 # call preprocessing function which returns traning data
-if TRAINING_NUM != 1400:
-    preprocessing = DataPreprocessing(training_num=TRAINING_NUM)
-    (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test) = preprocessing.get_data()
-    # get shuffle indices
-    indices = preprocessing.indices
+if NUM_TRAINING != 1400:
+    preprocessing = DataPreprocessing()
+    preprocessing.save_data()
+
+get_dataset = GetData(factor=DECIMATION,
+                      num_training=NUM_TRAINING,
+                      complex_network=COMPLEX,
+                      forward=FORWARD)
+if FORWARD:
+    (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test) = get_dataset()
 else:
-    (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test) = load_data()
+    (x_train, y_train), (x_test, y_test) = get_dataset()
 
 
 
 
 if LOAD_MODEL:
-
     # custom model needs to add custom function
     custom_object = get_custom_object()
     if FORWARD:
         model = tf.keras.models.load_model('modelF_bnT_50_valid.h5',custom_objects=custom_object)
         prediction = model.predict([x_test, ideal_test])
     else:
-        model = tf.keras.models.load_model('model_bnT_100_valid.h5',custom_objects=custom_object)
+        model = tf.keras.models.load_model('model_bnT_200_valid.h5',custom_objects=custom_object)
         prediction = model.predict(x_test)
 
 else:
@@ -79,32 +86,20 @@ else:
                  losses=LOSS,
                  callbacks=callbacks,
                  complex_network=COMPLEX)
+    name = UNet.generate_name()
     if FORWARD:
         model, history = UNet([x_train, ideal_train], y_train)
         prediction = model.predict([x_test, ideal_test])
     else:
         model, history = UNet(x_train, y_train)
         prediction = model.predict(x_test)
-    np.save(f'history_epochs{EPOCHS}_foward{FORWARD}.npy',history.history)
-    plt.figure()
-    plt.plot(history.history['loss'], label='training loss')
-    if VALIDATION_SPLIT:
-        plt.plot(history.history['val_loss'], label='val loss')
-        plt.legend()
-    plt.xlabel('epochs')
-    plt.ylabel('loss')
-    plt.savefig(f'loss_epochs{EPOCHS}_foward{FORWARD}.png')
-    plt.show()
+    save_model(model, history.history, name)
       
 
-
-show_fig(x_test[NFIG], 'speckle (linear)')
-show_fig(prediction[NFIG], 'predicted image (linear)')
-show_fig(y_test[NFIG], 'psf (linear)')
-
-show_fig(x_test[NFIG], 'speckle (dB)', DR)
-show_fig(prediction[NFIG], 'predicted image (dB)', DR)
-show_fig(y_test[NFIG], 'psf (dB)', DR)
+level, ind =  get_dataset.find_level(NFIG, train=False)
+show_fig(x_test[NFIG], ind, 'speckle (dB) ' + str(level), DR)
+show_fig(prediction[NFIG], ind, 'predicted image (dB) ' + str(level), DR)
+show_fig(y_test[NFIG], ind, 'psf (dB) ' + str(level), DR)
 
 # metrics
 mse = tf.keras.losses.MeanSquaredError()
