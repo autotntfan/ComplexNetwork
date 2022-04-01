@@ -5,12 +5,14 @@ Created on Wed Mar 16 21:24:37 2022
 @author: benzener
 """
 
-from train_utils import show_fig, set_env, get_custom_object, get_default, save_model
+from train_utils import show_fig, set_env, get_custom_object, get_default, save_model, envelope_detection
 from newdataset import DataPreprocessing, GetData
 from model import Model
+from complexnn.loss import ComplexMSE
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 '''
     This file is main script running model and plotting outputs.
 '''
@@ -35,7 +37,7 @@ DR                 = 40      # dynamic range in dB
 
 ACTIVATION         = 'LeakyReLU'   # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
 LOSS               = 'ComplexMSE'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
-
+DIR                = r'./modelinfo'
 # check and allow gpu memory to grow
 set_env()
 if USING_DEFAULT:
@@ -64,7 +66,12 @@ if LOAD_MODEL:
         model = tf.keras.models.load_model('modelF_bnT_50_valid.h5',custom_objects=custom_object)
         prediction = model.predict([x_test, ideal_test])
     else:
-        model = tf.keras.models.load_model('model_bnT_200_valid.h5',custom_objects=custom_object)
+        if COMPLEX:
+            model = tf.keras.models.load_model('model_bnT_300_valid_default.h5',custom_objects=custom_object)
+        else:
+            model_name = 'realmodel_forward_200_MSE_LeakyReLU_'
+            model = tf.keras.models.load_model(os.path.join(DIR,model_name+'27032022',model_name+'.h5'),
+                                               custom_objects=custom_object)
         prediction = model.predict(x_test)
 
 else:
@@ -103,7 +110,13 @@ show_fig(y_test[NFIG], ind, 'psf (dB) ' + str(level), DR)
 
 # metrics
 mse = tf.keras.losses.MeanSquaredError()
-print("MSE", mse(prediction[NFIG],y_test[NFIG]).numpy())
-print("SSIM", tf.image.ssim(prediction[NFIG],y_test[NFIG],max_val=2).numpy())
+
+envelope_pred = np.expand_dims(envelope_detection(prediction[NFIG]),axis=0)
+envelope_true = np.expand_dims(envelope_detection(y_test[NFIG]),axis=0)
+
+    
+print("MSE", mse(envelope_pred,envelope_true).numpy())
+print("SSIM", tf.image.ssim(envelope_pred,envelope_true,max_val=2).numpy())
+print('inference time', inference(model, x_test))
 
 tf.keras.backend.clear_session()

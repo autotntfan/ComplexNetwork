@@ -59,9 +59,7 @@ class DataPreprocessing():
                 print(i+1)
         # turn complex-valued array to two channel real-valued one.
         psf_bb = self.__expand_dims(psf_bb)
-        psf_rf = psf_rf.astype(np.float32)
         speckle_bb = self.__expand_dims(speckle_bb)
-        speckle_rf = speckle_rf.astype(np.float32)
         if self.normalization:
             print('now normalizing......')
             psf_bb = self.__normalization(psf_bb)
@@ -82,8 +80,8 @@ class DataPreprocessing():
         
     def __expand_dims(self, x):
         assert x.dtype == complex
-        real = np.expand_dims(x.real,axis=-1).astype(np.float32)
-        imag = np.expand_dims(x.imag,axis=-1).astype(np.float32)
+        real = np.expand_dims(x.real,axis=-1)
+        imag = np.expand_dims(x.imag,axis=-1)
         return np.concatenate((real,imag),axis=-1)
     
     def __normalization(self, x):
@@ -98,8 +96,8 @@ class DataPreprocessing():
             real = x[:,:,:,:channel]
             imag = x[:,:,:,channel:]
             modulus = np.sqrt(real**2 + imag**2)
-            ratio = np.max(modulus,axis=(1,2,3)).reshape(x.shape[0],1,1,1) + 1e-16
-        return np.nan_to_num(x/ratio)
+            ratio = np.max(modulus,axis=(1,2,3)).reshape(x.shape[0],1,1,1)
+        return np.nan_to_num(x/ratio).astype(np.float32)
             
 
 class GetData():
@@ -108,7 +106,7 @@ class GetData():
     DIRETORY = r'./parameters'
     
     def __init__(self,
-                 factor=2,
+                 factor=1,
                  num_training=1400,
                  complex_network=True,
                  forward=True,

@@ -25,6 +25,7 @@ class Model():
                  lr=1e-4,
                  epochs=2,
                  validation_split=0.2,
+                 seed=7414,
                  activations='LeakyReLU',
                  losses='ComplexMSE',
                  apply_batchnorm=True,
@@ -37,6 +38,7 @@ class Model():
         self.lr = lr
         self.epochs = epochs
         self.validation_rate = validation_split
+        self.seed = seed
         self.activations = activations
         self.losses = losses
         self.apply_batchnorm = apply_batchnorm
@@ -46,7 +48,6 @@ class Model():
         
         self.input_shape = None
         self.forward = False
-        self.input_shape = (256,256,2)
         
     
     def __call__(self, x, y):
@@ -133,6 +134,7 @@ class Model():
         return result
         
     def UNet(self):
+        tf.random.set_seed(self.seed)
         inputs = Input(self.input_shape)
         if self.forward:
             inputs_forward = Input(self.input_shape)
@@ -206,7 +208,7 @@ class Model():
     
     def generate_name(self):
         type_ = 'complex' if self.complex_network else 'real'
-        forward = 'Notfoward' if self.forward else 'foward'
+        forward = 'foward' if self.forward else 'Notfoward'
         epochs = str(self.epochs)
         return f'{type_}model_{forward}_{epochs}_{self.losses}_{self.activations}_'
     
@@ -218,7 +220,6 @@ class Model():
             'forward':self.forward,
             'callback':self.callbacks,
             'complex':self.complex_network,
-            'num_training':self.input_shape[0],
             'validation_split':self.validation_rate,
             'filters':self.filters,
             'kernel_size':self.size,
