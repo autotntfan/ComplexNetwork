@@ -8,22 +8,21 @@ Created on Sun Dec 26 22:25:07 2021
 import tensorflow as tf
 from .utils_test import get_realpart, get_imagpart
 import tensorflow.keras.backend as K
-
+import numpy as np
+import scipy.signal as Signal
+from tensorflow.keras.utils import get_custom_objects
 
 def ComplexRMS(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    return tf.sqrt(tf.reduce_sum(_get_square_error(y_true, y_pred),axis=-1))
-'''
-n應為complex channel數量 即shape[-1]//2
-在此尚未修改 仍為2*n
-'''
+    return tf.sqrt(tf.reduce_mean(_get_square_error(y_true, y_pred)))
+
 def ComplexMSE(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    return tf.reduce_sum(_get_square_error(y_true, y_pred),axis=-1)
+    return tf.reduce_mean(_get_square_error(y_true, y_pred))
 
 def ComplexMAE(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    return tf.reduce_sum(tf.sqrt(_get_square_error(y_true, y_pred)),axis=-1)
+    return tf.reduce_mean(tf.sqrt(_get_square_error(y_true, y_pred)))
 
 
 # def _feature_size(x):
@@ -91,8 +90,45 @@ def _precheck(y_true,y_pred):
 #        print('wrong')
 #        print(tf.ensure_shape(y_true.get_shape(),y_pred.get_shape()))
     return tf.cast(y_true,dtype=tf.float32), tf.cast(y_pred,dtype=tf.float32)
+'''
+    Although numpy function has been wrapped, it still can't compute gradient.
+    Only the python function including tensor computation can obtain gradient.
+'''
+# def _envelope_detection(signal): 
+#     shape = signal.shape
+#     if shape[-1]%2:
+#         envelope = np.abs(Signal.hilbert(signal, axis=1))
+#     else:
+#         channel = shape[-1]//2
+#         envelope = np.sqrt(signal[:,:,:,channel:]**2 + signal[:,:,:,channel:]**2)
+#     ratio = np.max(envelope, axis=(1,2,3),keepdims=True)
+#     return (envelope/ratio).astype(np.float32)
 
-        
+# # @tf.function(input_signature=[tf.TensorSpec(None,dtype=tf.float32),tf.TensorSpec(None,dtype=tf.float32)])
+# def SSIM(y_true,y_pred):
+#     envelope_true = tf.py_function(_envelope_detection,[y_true],tf.float32)
+#     envelope_pred = tf.py_function(_envelope_detection,[y_pred],tf.float32)
+#     tf.print(1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7)))
+#     return 1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7))
+
+def _envelope_detection(signal):
+    channel = tf.shape(signal)[-1]//2
+    envelope = (signal[:,:,:,:channel]**2 + signal[:,:,:,channel:]**2)**0.5
+    ratio = tf.reduce_max(envelope, axis=(1,2,3),keepdims=True)
+    return envelope/ratio
+
+def SSIM(y_true,y_pred):
+    if y_pred.shape[-1]%2:
+        ratio = tf.reduce_max(tf.abs(y_pred), axis=(1,2,3),keepdims=True)
+        y_pred = y_pred/ratio
+        return 1 - tf.reduce_mean(tf.image.ssim(y_pred,y_true,max_val=2,filter_size=7))
+    else:
+        envelope_true = _envelope_detection(y_true)
+        envelope_pred = _envelope_detection(y_pred)
+        return 1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7))
+get_custom_objects().update({'SSIM': SSIM})   
+
+
 
 
 
