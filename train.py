@@ -5,12 +5,10 @@ Created on Wed Mar 16 21:24:37 2022
 @author: benzener
 """
 
-from train_utils import show_fig, set_env, get_custom_object, get_default, save_model, envelope_detection
+from train_utils import show_fig, set_env, get_custom_object, get_default, save_model, envelope_detection, inference
 from newdataset import DataPreprocessing, GetData
 from model import Model
-from complexnn.loss import ComplexMSE
 import tensorflow as tf
-import matplotlib.pyplot as plt
 import numpy as np
 import os
 '''
@@ -21,22 +19,22 @@ import os
 LOAD_MODEL         = False    # whether load pretrained model, True or False
 FORWARD            = False   # whether use forward UNet or not, True or False
 CALLBACK           = False   # whether add callbacks in model fit, True or False
-COMPLEX            = True  # whether use complex- or real-valued network, True or False
+COMPLEX            = False  # whether use complex- or real-valued network, True or False
 USING_DEFAULT      = False
 
 NUM_TRAINING       = 1400    # number of training data, max:1600
-DECIMATION         = 2       # downsample factor
-FILTERS            = 8      # number of filters for the shallowest conv2D layer
-SIZE               = (3,6)    # size of each Conv2D kernel
+DECIMATION         = 1       # downsample factor
+FILTERS            = 4      # number of filters for the shallowest conv2D layer
+SIZE               = (3,3)    # size of each Conv2D kernel
 BATCH_SIZE         = 16       # mini-batch size
 LR                 = 1e-4    # learning rate of optimizer
-EPOCHS             = 200      # training epochs
+EPOCHS             = 2      # training epochs
 VALIDATION_SPLIT   = 0.2     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
-NFIG               = 3       # show the n-th fig of speckle, target, or prediction
-DR                 = 40      # dynamic range in dB
+NFIG               = 93       # show the n-th fig of speckle, target, or prediction
+DR                 = 60      # dynamic range in dB
 
-ACTIVATION         = 'LeakyReLU'   # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
-LOSS               = 'ComplexMSE'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
+ACTIVATION         = 'LeakyReLU'  # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
+LOSS               = 'SSIM'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
 DIR                = r'./modelinfo'
 # check and allow gpu memory to grow
 set_env()
@@ -57,8 +55,6 @@ else:
     (x_train, y_train), (x_test, y_test) = get_dataset()
 
 
-
-
 if LOAD_MODEL:
     # custom model needs to add custom function
     custom_object = get_custom_object()
@@ -67,11 +63,13 @@ if LOAD_MODEL:
         prediction = model.predict([x_test, ideal_test])
     else:
         if COMPLEX:
-            model = tf.keras.models.load_model('model_bnT_300_valid_default.h5',custom_objects=custom_object)
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_13042022'
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_30032022'
+            model_name = 'complexmodel_Notforward_10_ComplexMSE_LeakyReLU_14042022'
         else:
-            model_name = 'realmodel_forward_200_MSE_LeakyReLU_'
-            model = tf.keras.models.load_model(os.path.join(DIR,model_name+'27032022',model_name+'.h5'),
-                                               custom_objects=custom_object)
+            model_name = 'realmodel_Notforward_200_MSE_LeakyReLU_30032022'
+        model = tf.keras.models.load_model(os.path.join(DIR,model_name,model_name+'.h5'),
+                                           custom_objects=custom_object)
         prediction = model.predict(x_test)
 
 else:
@@ -111,12 +109,31 @@ show_fig(y_test[NFIG], ind, 'psf (dB) ' + str(level), DR)
 # metrics
 mse = tf.keras.losses.MeanSquaredError()
 
-envelope_pred = np.expand_dims(envelope_detection(prediction[NFIG]),axis=0)
-envelope_true = np.expand_dims(envelope_detection(y_test[NFIG]),axis=0)
-
+shape = (1,) + prediction[NFIG].shape[:-1] + (1,)
+envelope_pred = envelope_detection(prediction[NFIG]).reshape(shape)
+envelope_true = envelope_detection(y_test[NFIG]).reshape(shape)
     
 print("MSE", mse(envelope_pred,envelope_true).numpy())
-print("SSIM", tf.image.ssim(envelope_pred,envelope_true,max_val=2).numpy())
+print("SSIM", tf.image.ssim(envelope_pred,
+                            envelope_true,
+                            max_val=1,
+                            filter_size=7).numpy())
+print("MS-SSIM", tf.image.ssim_multiscale(envelope_pred,
+                                                  envelope_true,
+                                                  max_val=1,
+                                                  filter_size=7).numpy())
 print('inference time', inference(model, x_test))
+
+envelope_pred = np.expand_dims(envelope_detection(prediction),axis=-1)
+envelope_true = np.expand_dims(envelope_detection(y_test),axis=-1)
+print('average MSE',tf.reduce_mean(mse(envelope_pred,envelope_true)).numpy())
+print("average SSIM", tf.reduce_mean(tf.image.ssim(envelope_pred,
+                                                   envelope_true,
+                                                   max_val=1,
+                                                   filter_size=7)).numpy())
+print("average MS-SSIM", tf.reduce_mean(tf.image.ssim_multiscale(envelope_pred,
+                                                                 envelope_true,
+                                                                 max_val=1,
+                                                                 filter_size=7)).numpy())
 
 tf.keras.backend.clear_session()
