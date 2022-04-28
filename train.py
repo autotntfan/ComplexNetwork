@@ -5,7 +5,8 @@ Created on Wed Mar 16 21:24:37 2022
 @author: benzener
 """
 
-from train_utils import show_fig, set_env, get_custom_object, get_default, save_model, envelope_detection, inference
+from train_utils import show_fig, save_model, envelope_detection, inference, save_metrics
+from train_utils import set_env, get_custom_object, get_default
 from newdataset import DataPreprocessing, GetData
 from model import Model
 import tensorflow as tf
@@ -16,7 +17,7 @@ import os
 '''
 
 
-LOAD_MODEL         = False    # whether load pretrained model, True or False
+LOAD_MODEL         = True    # whether load pretrained model, True or False
 FORWARD            = False   # whether use forward UNet or not, True or False
 CALLBACK           = False   # whether add callbacks in model fit, True or False
 COMPLEX            = False  # whether use complex- or real-valued network, True or False
@@ -24,9 +25,9 @@ USING_DEFAULT      = False
 
 NUM_TRAINING       = 1400    # number of training data, max:1600
 DECIMATION         = 1       # downsample factor
-FILTERS            = 4      # number of filters for the shallowest conv2D layer
-SIZE               = (3,3)    # size of each Conv2D kernel
-BATCH_SIZE         = 16       # mini-batch size
+FILTERS            = 16      # number of filters for the shallowest conv2D layer
+SIZE               = (6,3)    # size of each Conv2D kernel
+BATCH_SIZE         = 8       # mini-batch size
 LR                 = 1e-4    # learning rate of optimizer
 EPOCHS             = 2      # training epochs
 VALIDATION_SPLIT   = 0.2     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
@@ -35,7 +36,8 @@ DR                 = 60      # dynamic range in dB
 
 ACTIVATION         = 'LeakyReLU'  # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
 LOSS               = 'SSIM'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
-DIR                = r'./modelinfo'
+DIR_SAVED          = r'./modelinfo'
+DIR_SIMULATION     = r'./simulation_straight'
 # check and allow gpu memory to grow
 set_env()
 if USING_DEFAULT:
@@ -65,10 +67,18 @@ if LOAD_MODEL:
         if COMPLEX:
             # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_13042022'
             # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_30032022'
-            model_name = 'complexmodel_Notforward_10_ComplexMSE_LeakyReLU_14042022'
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_10042022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_MSE_LeakyReLU_20042022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_18042022'
+            # model_name = 'complexmodel_Notforward_300_SSIM_LeakyReLU_22042022'
+            model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_22042022'
+            # model_name = 'complexmodel_Notforward_200_MS_SSIM_LeakyReLU_23042022'
         else:
-            model_name = 'realmodel_Notforward_200_MSE_LeakyReLU_30032022'
-        model = tf.keras.models.load_model(os.path.join(DIR,model_name,model_name+'.h5'),
+            # model_name = 'realmodel_Notforward_200_MSE_LeakyReLU_30032022'
+            # model_name = 'realmodel_Notforward_200_SSIM_LeakyReLU_19042022'
+            # model_name = 'realmodel_Notforward_100_SSIM_MSE_LeakyReLU_20042022'
+            model_name = 'realmodel_Notforward_300_SSIM_LeakyReLU_26042022'
+        model = tf.keras.models.load_model(os.path.join(DIR_SAVED,model_name,model_name+'.h5'),
                                            custom_objects=custom_object)
         prediction = model.predict(x_test)
 
@@ -91,20 +101,20 @@ else:
                  losses=LOSS,
                  callbacks=callbacks,
                  complex_network=COMPLEX)
-    name = UNet.generate_name()
+    model_name = UNet.generate_name()
     if FORWARD:
         model, history = UNet([x_train, ideal_train], y_train)
         prediction = model.predict([x_test, ideal_test])
     else:
         model, history = UNet(x_train, y_train)
         prediction = model.predict(x_test)
-    save_model(model, history.history, name)
+    save_model(model, history.history, model_name)
       
 
 level, ind =  get_dataset.find_level(NFIG, train=False)
-show_fig(x_test[NFIG], ind, 'speckle (dB) ' + str(level), DR)
-show_fig(prediction[NFIG], ind, 'predicted image (dB) ' + str(level), DR)
-show_fig(y_test[NFIG], ind, 'psf (dB) ' + str(level), DR)
+show_fig(x_test[NFIG], ind, 'speckle' + str(level), DR, model_name)
+show_fig(prediction[NFIG], ind, 'prediction' + str(level), DR, model_name)
+show_fig(y_test[NFIG], ind, 'psf' + str(level), DR, model_name)
 
 # metrics
 mse = tf.keras.losses.MeanSquaredError()
@@ -136,4 +146,5 @@ print("average MS-SSIM", tf.reduce_mean(tf.image.ssim_multiscale(envelope_pred,
                                                                  max_val=1,
                                                                  filter_size=7)).numpy())
 
+save_metrics(envelope_pred, envelope_true, model_name)
 tf.keras.backend.clear_session()
