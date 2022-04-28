@@ -1,46 +1,37 @@
 clear 
 close all
+
 global DR
 DR=60;
+
 % loading data
-% load('D:/ComplexDataset/simulation_straight/Data_179_delay_2.mat')
+load('D:/ComplexDataset/simulation_straight/Data_179_delay_2.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_185_delay_1.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_396_delay_2.mat')
-load('D:/ComplexDataset/simulation_straight/Data_322_delay_1.mat')
-envelope = Envelope(psf_rf,DR);
-image(envelope)
-colormap(gray(DR))
-fs = 1/(2*dz/1540);
-figure
-showfft(psf_rf,fs)
-figure
-image(20*log10(abs(psf_bb)/max(max(abs(psf_bb)))+eps) + DR)
-colormap(gray(DR))
-figure
-showfft(abs(psf_bb),fs)
-figure
-showfft(speckle_rf,fs)
-figure
-showfft(abs(speckle_bb),fs)
-figure
-image(envelope(1:200,:))
-colormap(gray(DR))
-axis image
-figure
-showfft(psf_rf(1:200,:),fs)
+% load('D:/ComplexDataset/simulation_straight/Data_322_delay_1.mat')
 
-pred_complex = readmatrix('D:/ComplexNetwork/complexpred.txt');
+pred_complex = readmatrix('complexpred.txt');
 pred_complex = reshape(pred_complex,[128,256,2]);
 pred_complex = pred_complex(:,:,1) + 1j.*pred_complex(:,:,2);
+pred_complex = normalization(pred_complex);
+
+figure
+image(20*log10((real(pred_complex)+1)/2+eps)+DR)
+colormap(gray(DR))
+figure 
+image(20*log10((imag(pred_complex)+1)/2+eps)+DR)
+colormap(gray(DR))
+
+true_complex = normalization(psf_bb(2:4:end,2:2:end));
 
 x_axis = (0:dx:dx*size(psf_bb,2)-dx).*1000;
 z_axis = (depth/2 + (0:dz:dz*size(psf_bb,1)-dz))*1000;
-envelope_rf = Envelope(psf_rf,DR);
+envelope_rf = envelope_detection(psf_rf,DR);
 figure
 showimg(x_axis,z_axis,envelope_rf)
 
-pred_real = readmatrix('D:/ComplexNetwork/realpred_tanh.txt');
-pred_real = reshape(pred_real,[256,256]);
+% pred_real = readmatrix('D:/ComplexNetwork/realpred_tanh.txt');
+% pred_real = reshape(pred_real,[256,256]);
 
 
 
@@ -144,7 +135,3 @@ function showfft(img, fs)
     xlabel('MHz')
 end
 
-function Envelope_dB = Envelope(img, DR)
-    envelope = abs(hilbert(img));
-    Envelope_dB = 20*log10(envelope/max(envelope(:))+eps) + DR;
-end
