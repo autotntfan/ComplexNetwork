@@ -11,18 +11,46 @@ import tensorflow.keras.backend as K
 import numpy as np
 import scipy.signal as Signal
 from tensorflow.keras.utils import get_custom_objects
+from tensorflow.keras.losses import MeanSquaredError, MeanAbsoluteError
 
 def ComplexRMS(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
     return tf.sqrt(tf.reduce_mean(_get_square_error(y_true, y_pred)))
 
 def ComplexMSE(y_true, y_pred):
+    '''
+    ComplexMSE esitmates the mean-squared error according to the
+    real part and imaginary part one-by-one.
+
+    Args:
+        y_true: the target with shape [N,H,W,C], where C must be
+            a multiple of 2 due to complex narture.
+        y_pred: the predicted data with the same shape as y_true.
+    
+    Returns:
+        a Tensor scalar, the mean value of the whole batch.
+
+    '''
     y_true, y_pred = _precheck(y_true, y_pred)
     return tf.reduce_mean(_get_square_error(y_true, y_pred))
 
 def ComplexMAE(y_true, y_pred):
+    '''
+    ComplexMAE esitmates the mean-absolute error according to the
+    real part and imaginary part one-by-one.
+
+    Args:
+        y_true: the target with shape [N,H,W,C], where C must be
+            a multiple of 2 due to complex narture.
+        y_pred: the predicted data with the same shape as y_true.
+    
+    Returns:
+        a Tensor scalar, the mean value of the whole batch.
+
+    '''
     y_true, y_pred = _precheck(y_true, y_pred)
-    return tf.reduce_mean(tf.sqrt(_get_square_error(y_true, y_pred)))
+    mae = MeanAbsoluteError()
+    return mae(y_true, y_pred)
 
 
 # def _feature_size(x):
@@ -35,10 +63,24 @@ def ComplexMAE(y_true, y_pred):
 
 
 def _get_square_error(y_true, y_pred):
+    '''
+    Compute the sqaured residual based on the two channel, real
+    and imaginary part.
+
+    Args:
+        y_true: the target with shape [N,H,W,C], where C must be
+            a multiple of 2 due to complex narture.
+        y_pred: the predicted data with the same shape as y_true.
+    
+    Returns:
+        a Tensor of size N represents squared error.
+
+    '''
     real_pdt = get_realpart(y_pred)
     imag_pdt = get_imagpart(y_pred)
     real_true = get_realpart(y_true)
     imag_true = get_imagpart(y_true)
+    # squared_error = (y_hat_real - y_real)**2 + (y_hat_imag - y_imag)**2
     result = tf.add(tf.pow(tf.subtract(real_pdt,real_true),2),tf.pow(tf.subtract(imag_pdt,imag_true),2))
     return result
 
@@ -90,10 +132,7 @@ def _precheck(y_true,y_pred):
 #        print('wrong')
 #        print(tf.ensure_shape(y_true.get_shape(),y_pred.get_shape()))
     return tf.cast(y_true,dtype=tf.float32), tf.cast(y_pred,dtype=tf.float32)
-'''
-    Although numpy function has been wrapped, it still can't compute gradient.
-    Only the python function including tensor computation can obtain gradient.
-'''
+
 # def _envelope_detection(signal): 
 #     shape = signal.shape
 #     if shape[-1]%2:
@@ -111,24 +150,96 @@ def _precheck(y_true,y_pred):
 #     tf.print(1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7)))
 #     return 1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7))
 
+def _normalization(signal):
+    '''
+    normalize the input signal.
+
+    Args:
+        signal: baseband signal with shape [N,H,W,C], where C must
+            be a multiple of 2. Future work may support to RF data.
+            2022/04/25 ver
+    Returns:
+        a normalized Tensor
+
+    '''
+    if signal.shape[-1]%2:
+        # the real-valued is normalized by itself maximum
+        normalized_target = tf.abs(signal)
+
+    else:
+        # the complex-valued is normalized by modulus
+        real = get_realpart(signal)
+        imag = get_imagpart(signal)
+        normalized_target = (real**2 + imag**2)**0.5
+    ratio = tf.reduce_max(normalized_target,axis=(1,2,3),keepdims=True)
+    return signal/ratio
+ 
 def _envelope_detection(signal):
+    '''
+    envelope detection. Convert BB signal to envelope signal.
+
+    Args:
+        signal: baseband signal with shape [N,H,W,C], where C must
+            be a multiple of 2. Future work may support to RF data.
+            2022/04/25 ver
+    Returns:
+        a normalized Tensor with only real-valued channel.
+
+    '''
     channel = tf.shape(signal)[-1]//2
     envelope = (signal[:,:,:,:channel]**2 + signal[:,:,:,channel:]**2)**0.5
-    ratio = tf.reduce_max(envelope, axis=(1,2,3),keepdims=True)
-    return envelope/ratio
+    return _normalization(envelope)
+   
+def _SSIM_core(y_true, y_pred, func):
+    '''
+    SSIM esitmation.
 
-def SSIM(y_true,y_pred):
+    Args:
+        y_true: the target with shape [N,H,W,C], where C must be
+            a multiple of 2 due to complex narture.
+        y_pred: the predicted data with the same shape as y_true.
+        func: a Tensor function either ssim or ms-ssim
+    
+    Returns:
+        a Tensor scalar, the (mean) value of the whole batch.
+
+    '''
     if y_pred.shape[-1]%2:
-        ratio = tf.reduce_max(tf.abs(y_pred), axis=(1,2,3),keepdims=True)
-        y_pred = y_pred/ratio
-        return 1 - tf.reduce_mean(tf.image.ssim(y_pred,y_true,max_val=2,filter_size=7))
+        y_pred = _normalization(y_pred)
+        return 1 - tf.reduce_mean(func(y_pred,y_true,max_val=2,filter_size=7))
     else:
-        envelope_true = _envelope_detection(y_true)
-        envelope_pred = _envelope_detection(y_pred)
-        return 1 - tf.reduce_mean(tf.image.ssim(envelope_pred,envelope_true,max_val=1,filter_size=7))
-get_custom_objects().update({'SSIM': SSIM})   
+        # envelope_true = _envelope_detection(y_true)
+        # envelope_pred = _envelope_detection(y_pred)
+        # return 1 - tf.reduce_mean(func(envelope_pred,envelope_true,max_val=1,filter_size=7))
+        y_pred = _normalization(y_pred)
+        real_pdt = get_realpart(y_pred)
+        imag_pdt = get_imagpart(y_pred)
+        real_true = get_realpart(y_true)
+        imag_true = get_imagpart(y_true)
+        imag_ssim = 1 - tf.reduce_mean(func(imag_pdt,imag_true,max_val=2,filter_size=7))
+        real_ssim = 1 - tf.reduce_mean(func(real_pdt,real_true,max_val=2,filter_size=7))
+        return (imag_ssim + real_ssim)/2
+        
+def SSIM(y_true,y_pred):
+    return _SSIM_core(y_true, y_pred, tf.image.ssim)
 
-
+def MS_SSIM(y_true,y_pred):
+    return _SSIM_core(y_true, y_pred, tf.image.ssim_multiscale)
+    
+def SSIM_MSE(y_true,y_pred):
+    ratio = 0.2
+    if y_pred.shape[-1]%2:
+        mse = MeanSquaredError()
+        mse = mse(y_true, y_pred)
+    else:
+        mse = ComplexMSE(y_true, y_pred)
+    ssim = SSIM(y_true,y_pred)
+    return ratio*ssim + mse
+    # return ssim*mse
+    
+get_custom_objects().update({'SSIM': SSIM,
+                             'MS_SSIM': MS_SSIM,
+                             'SSIM_MSE': SSIM_MSE})
 
 
 
