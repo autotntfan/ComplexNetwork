@@ -90,7 +90,7 @@ class DataPreprocessing():
             x = x.reshape(x.shape+(1,))
         assert len(x.shape) == 4
         if x.shape[-1]%2:
-            ratio = np.max(x, axis=(1,2,3)).reshape(x.shape[0],1,1,1)
+            ratio = np.max(np.abs(x), axis=(1,2,3)).reshape(x.shape[0],1,1,1)
         else:
             channel = x.shape[-1]//2
             real = x[:,:,:,:channel]
