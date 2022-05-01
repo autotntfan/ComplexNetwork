@@ -4,43 +4,66 @@ Created on Wed Mar 16 21:13:56 2022
 
 @author: benzener
 """
-
-import numpy as np
-import matplotlib.pyplot as plt
-import scipy.signal as Signal
-from scipy import io
-import tensorflow as tf
 import complexnn
 import os
-from datetime import datetime
 import time
+import numpy             as np
+import tensorflow        as tf
+import seaborn           as sns
+import matplotlib.pyplot as plt
+import scipy.signal      as Signal
+from scipy    import io
+from datetime import datetime
+
 
 DIR_SAVED          = r'./modelinfo'
-DIR_SIMULATION     = r'./simulation_straight'
+# DIR_SIMULATION     = r'./simulation_straight'
+DIR_SIMULATION     = r'./simulation_data'
+DATA_SIZE = (1000,257,257)
 
 def check_data_range(x):
-    max_ = np.max(x)
-    min_ = np.min(x)
-    print(f'the largest value is {max_} and the smallest one is {min_}')
+    print(f'the largest value is {np.max(x)} and the smallest one is {np.min(x)}')
     
 def show_fig(img, ind=None, title_=None, DR=None, name=None):
-    # check image dimension is 3 or 4
-    if len(img.shape) == 4:
+    '''
+    show_fig function shows the B-mode image in dB scale if DR 
+    exists otherwise linear scale. More known arguments, such
+    as ind, title_ and name, it gives you more information.
+    
+    
+    Args:
+        img: numpy array 
+            Displayed image array with shape [1,H,W,C] or [H,W,C]
+        ind: int 
+            The index or the n-th data, e.g. 'Data_179_delay_2' 
+            is the 713-rd data.
+        title_: string
+            The title of displayed image
+        DR: Dynamic range
+        name: string
+            the name of the desired model, in order to get the
+            axis of the image.
+    '''
+    # check image dimension is [H,W,C] or [1,H,W,C]
+    if img.ndim == 4:
         if img.shape[0] != 1:
             raise ValueError('unable to support multiple images')
-        shape = img.shape[1:-1]
-    elif len(img.shape) == 3:
-        shape = img.shape[:-1]
-    else:
+        img = img[0] # [1,H,W,C] -> [H,W,C]
+    elif img.ndim != 3: # only support [1,H,W,C] or [H,W,C]
         raise ValueError('invalid image shape')
+    assert img.ndim == 3
+    plt.figure(dpi=300)
     if ind is None:
         axis = None
     else:
+        # obtain depth and lateral position
         axis = _get_axis(img, ind)
-    plt.figure(dpi=300)
+        plt.xlabel('Lateral position (mm)')
+        plt.ylabel('Depth (mm)')
+    # envelope_detection: [H,W,C] -> [H,W]
     envelope_img = envelope_detection(img, DR)
-    envelope_img = envelope_img.reshape(shape)
-    assert len(envelope_img.shape) == 2
+    # plt.imshow() only supports [H,W] for grayscale.
+    assert envelope_img.ndim == 2
     if DR is not None:
         plt.imshow(envelope_img,
                     cmap='gray',
@@ -53,8 +76,6 @@ def show_fig(img, ind=None, title_=None, DR=None, name=None):
     if title_ is not None:
         assert isinstance(title_, str)
         plt.title(title_)
-    plt.xlabel('Lateral position (mm)')
-    plt.ylabel('Depth (mm)')
     if name is not None:
         saved_name = os.path.join(DIR_SAVED, name , title_ + str(ind) + '.png')
         plt.savefig(saved_name, dpi=300)
@@ -64,35 +85,46 @@ def envelope_detection(signal, DR=None):
     '''
     Parameters
     ----------
-    signal : float32, numpy array
+    signal : float32, numpy array with shape [N,H,W,C] or [H,W,C]
     DR : int, dynamic range. The default is None.
     Returns
     -------
-    envelop-detected signal in float32. Its shape is same as input shape.
+    envelop-detected signal in float32. Its shape is [N,H,W] or
+    [H,W] depending on the input shape.
     '''
     # check dtype
     if not np.isreal(signal).all():
         raise ValueError('signal must be an one-channel or two-channel real-valued array')
-    # check rank
-    if len(signal.shape) == 3:
+    # output shape = [H,W] if input shape is [H,W,C],
+    # output shape = [N,H,W] if input shape is [N,H,W,C]
+    reduce_dim = False 
+    # check rank and expand to [N,H,W,C]
+    if signal.ndim == 3: # [H,W,C] -> [N,H,W,C]
         signal = np.expand_dims(signal, axis=0)
-    shape = signal.shape
+        reduce_dim = True
+    shape = signal.shape # shape = [N,H,W,C]
     assert len(shape) == 4
-    
     if shape[-1] == 2:
+        # if complex, envelope = absolute value
         envelope = np.sqrt(signal[:,:,:,0]**2 + signal[:,:,:,1]**2)
     elif shape[-1] == 1:
-        envelope = np.abs(Signal.hilbert(signal, axis=1))
+        # if real, envelope = absolute after hilbert transform
+        envelope = np.abs(Signal.hilbert(signal, axis=1)).reshape(shape[:-1])
     else:
         raise ValueError('signal channels must be one or two')
-    envelope = envelope.reshape(shape[:-1])
     ratio = np.max(envelope, axis=(1,2),keepdims=True)
     envelope = envelope/ratio
     if DR is None:
-        return envelope
+        if reduce_dim:
+            return envelope[0] # [H,W]
+        else:
+            return envelope # [N,H,W]
     else:
         dB_img = 20*np.log10(envelope + 1e-16) + DR
-        return dB_img
+        if reduce_dim:
+            return dB_img[0] # [H,W]
+        else:
+            return dB_img # [N,H,W]
 
 def set_env():
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -162,12 +194,11 @@ def save_metrics(envelope_pred, envelope_true, name):
                                                           max_val=1,
                                                           filter_size=7)).numpy()
         }
-    print(file_name)
     with open(file_name,'w') as f:
         f.write(str(metrics))
      
 def _get_axis(img, ind, fs=False):
-    assert len(img.shape) ==3
+    assert img.ndim == 3
     r, c = img.shape[:2]
     if (ind+1)%4 == 0:
         level = 4
@@ -177,8 +208,8 @@ def _get_axis(img, ind, fs=False):
     print(file_name)
     file_path = os.path.join(DIR_SIMULATION, file_name)
     data = io.loadmat(file_path)
-    dx = data.get('dx') * (513/img.shape[1])
-    dz = data.get('dz') * (513/img.shape[0])
+    dx = data.get('dx') * (DATA_SIZE[2]/img.shape[1])
+    dz = data.get('dz') * (DATA_SIZE[1]/img.shape[0])
     depth = data.get('depth')/2
     x_axis = np.linspace(0,dx*c-dx,c) * 1e3 # [mm]
     z_axis = np.linspace(0,dz*r-dz,r) * 1e3 + depth * 1e3 # [mm]
@@ -200,15 +231,46 @@ def inference(model, testset):
         time_collection.append(e-s)
     return np.mean(time_collection)/testset.shape[0]
 
-def lateral_projection(signal):
-    if len(signal.shape) == 4:
-        projection = np.max(signal,axis=1)
+def projection(signal, ref=None, name=None, DR=60, direction='lateral'):
+    '''
+    project along axis. 
+    lateral projection if axis = H (height).
+    axial projection if axis = W (width).
+    e.g. input signal with shape (1,128,256,1)
+        Expected output shape for lateral projection is (256,),
+        which means the np.max along the second axis (axis=1).
+        Axial projection is (128,) when np.max along the third
+        axis (axis=2).
+        
+    Parameters
+    ----------
+    signal : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
+    if direction not in {'lateral','axial'}:
+        raise ValueError("direction only along 'lateral' or 'axial' ")
+    if signal.ndim == 4:
+        axis = 1 if direction == 'lateral' else 2
+    elif signal.ndim < 2 or signal.ndim > 4:
+        raise ValueError(f'Unsupport dimension {signal.ndim}')
     else:
-        projection = np.max(signal,axis=0)
+        axis = 0 if direction == 'lateral' else 1   
     plt.figure()
-    plt.plot(projection)
+    plt.plot(np.max(envelope_detection(signal,DR), axis, initial=0))
+    if ref is not None:
+        assert ref.shape == signal.shape
+        plt.plot(np.max(envelope_detection(ref,DR), axis, initial=0))
+        plt.legend(['pred','true'])
+    if name is not None:
+        saved_name = os.path.join(DIR_SAVED, name ,name + direction + '.png')
+        plt.savefig(saved_name, dpi=300)
     plt.show()
-    return projection
+
 
 def show_fft(signal, ind, Aline=False):
     # signal shape = [H,W,C]
@@ -226,6 +288,47 @@ def show_fft(signal, ind, Aline=False):
     plt.xlabel('MHz')
     plt.show()
 
+def phase_diff(y_true, y_pred, name=None):
+    assert y_true.shape == y_pred.shape
+    if y_true.ndim == 4:
+        if y_true.shape[0] != 1:
+            raise ValueError('Only support one image')
+        else:
+            y_true = y_true.reshape(y_true.shape[1:])
+            y_pred = y_true.reshape(y_true.shape[1:])
+    assert y_true.ndim == 3
+    if y_true.shape[-1]%2:
+        y_true = Signal.hilbert(y_true, axis=0)
+        y_pred = Signal.hilbert(y_pred, axis=0)
+    else:
+        y_true = y_true[:,:,0] + 1j*y_true[:,:,1]
+        y_pred = y_pred[:,:,0] + 1j*y_pred[:,:,1]
+    angle_err = np.abs(np.angle(y_true) - np.angle(y_pred))
+    sns.heatmap(angle_err)
+    if name is not None:
+        saved_name = os.path.join(DIR_SAVED, name , name + '_anglediff.png')
+        plt.savefig(saved_name, dpi=300)
+
+
+def multimodel(test_img):
+    model_set = {
+        'complexmodel_Notforward_300_SSIM_LeakyReLU_22042022', # two-branch SSIM
+        'complexmodel_Notforward_200_SSIM_MSE_LeakyReLU_29042022', # two-branch SSIM + angle MSE
+        'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_13042022', # MSE
+        'complexmodel_Notforward_200_SSIM_LeakyReLU_18042022', # envelope SSIM
+        'complexmodel_Notforward_300_SSIM_LeakyReLU_22042022', # 2-branch SSIM filter size = 5
+        'complexmodel_Notforward_300_SSIM_LeakyReLU_30042022' # 2-branch SSIM filter size = 7
+        
+        }
+    for model_name in model_set:
+        model = tf.keras.models.load_model(os.path.join(DIR_SAVED,model_name,model_name+'.h5'),
+                                       custom_objects=get_custom_object())
+        prediction = model.predict(np.expand_dims(test_img,axis=0))
+        phase_diff(np.expand_dims(test_img,axis=0), prediction)
+        show_fig(prediction,DR=60)
+        del model
+    
+        
 # class PostProcessing():
     
 #     def __init__(self,
@@ -374,18 +477,3 @@ def show_fft(signal, ind, Aline=False):
 #         xmin, xmax = (np.min(x_axis), np.max(x_axis))
 #         zmin, zmax = (np.min(z_axis), np.max(z_axis))
 #         return (xmin, xmax, zmax, zmin)
-    
-
-      
-    
-        
-    
-            
-    
-
-
-
-
-
-
-    
