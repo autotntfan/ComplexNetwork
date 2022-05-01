@@ -8,6 +8,8 @@ import os
 from scipy import io
 import numpy as np
 
+DATA_SIZE = (1000,257,257)
+
 class DataPreprocessing():
     '''
         Save speckle and psf in rf or BB.
@@ -22,9 +24,9 @@ class DataPreprocessing():
                            
             __normalization: normalize value in the range [-1, 1].
     '''
-    DATA_SIZE = (1600,513,513)
+    
     def __init__(self,
-                 path=r'./simulation_straight',
+                 path=r'./simulation_data',
                  normalization=True,
                  ):
         self.path = path
@@ -36,15 +38,15 @@ class DataPreprocessing():
         Hence, here name four array directly ensuring memory would be sufficient and run efficiently.
 
         '''
+        self.__sanitized()     # check data size is compatible with dataset  
         file_name = os.listdir(self.path)
-        
-        psf_bb = np.zeros(self.DATA_SIZE, dtype=complex)
-        psf_rf = np.zeros(self.DATA_SIZE)
-        speckle_bb = np.zeros(self.DATA_SIZE,dtype=complex)
-        speckle_rf = np.zeros(self.DATA_SIZE)
+        psf_bb = np.zeros(DATA_SIZE, dtype=complex)
+        psf_rf = np.zeros(DATA_SIZE)
+        speckle_bb = np.zeros(DATA_SIZE,dtype=complex)
+        speckle_rf = np.zeros(DATA_SIZE)
         # read psf and speckle in sequence
         for i, name in enumerate(file_name):
-            if name.split('.')[-1] == 'py':
+            if name.split('.')[-1] in {'py','png'}:
                 continue
             else:
                 ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
@@ -86,9 +88,9 @@ class DataPreprocessing():
     
     def __normalization(self, x):
         # data shape only allows (N, H, W, C)
-        if len(x.shape) == 3:
+        if x.ndim == 3:
             x = x.reshape(x.shape+(1,))
-        assert len(x.shape) == 4
+        assert x.ndim == 4
         if x.shape[-1]%2:
             ratio = np.max(np.abs(x), axis=(1,2,3)).reshape(x.shape[0],1,1,1)
         else:
@@ -98,16 +100,25 @@ class DataPreprocessing():
             modulus = np.sqrt(real**2 + imag**2)
             ratio = np.max(modulus,axis=(1,2,3)).reshape(x.shape[0],1,1,1)
         return np.nan_to_num(x/ratio).astype(np.float32)
+    
+    def __sanitized(self):
+        if self.path == r'./simulation_data':
+            assert DATA_SIZE == (1000,257,257)
+        elif self.path == r'./simulation_data':
+            assert DATA_SIZE == (1600,513,513)
+        else:
+            raise ValueError('Unsupport path')
             
 
 class GetData():
     # return training, testing data , and even ideal psf
-    NUM_DATA = 1600
+   
+    NUM_DATA = DATA_SIZE[0]
     DIRETORY = r'./parameters'
     
     def __init__(self,
                  factor=1,
-                 num_training=1400,
+                 num_training=800,
                  complex_network=True,
                  forward=True,
                  seed=7414):
@@ -119,7 +130,10 @@ class GetData():
     
         self.indices = None
         self.dataset = None
+        
     def __call__(self):
+        if self.num_training > self.NUM_DATA:
+            raise ValueError(f"Dataset only has {self.NUM_DATA} samples but requires {self.num_training} training data")
         # select rf or BB data
         if self.complex_network:
             dtype = ['speckle_bb', 'psf_bb']
@@ -132,7 +146,7 @@ class GetData():
             }
  
         self.__shuffle_data()
-    
+        
         x_train, x_test = self.get_data(dtype[0])
         y_train, y_test = self.get_data(dtype[1])
 
@@ -161,10 +175,7 @@ class GetData():
             print('File is loading ......')
             train = self.__read_cache(self.dataset[dtype][0])
             test = self.__read_cache(self.dataset[dtype][1])
-            if self.complex_network:
-                assert train.shape == (self.num_training, 256//self.factor, 256, 2)
-            else:
-                assert train.shape == (self.num_training, 256//self.factor, 256, 1)
+            assert train.shape == self.__output_shape()
             return train, test
         except (FileNotFoundError, AssertionError):
             print('File is not found or inaccurate, now creating ......')
@@ -199,7 +210,7 @@ class GetData():
         rng.shuffle(self.indices) # suffle order
 
     def __reduce_sampling_rate(self, signal):
-        assert len(signal.shape) == 4
+        assert signal.ndim == 4
         return signal[:,::self.factor,:,:]
     
     def __slice(self, dtype, flag=False):
@@ -244,12 +255,13 @@ class GetData():
         return np.load(os.path.join(self.DIRETORY, name + '.npy'))
     
     def __load_file(self, path):
-        return np.load(path)[:,1::2,1::2,:]
+        return np.load(path)[:, DATA_SIZE[1]%2:, DATA_SIZE[2]%2:, :]
     
-
-        
-            
-
-        
-
-        
+    def __output_shape(self):
+        output_shape = (self.num_training,) + \
+            ((DATA_SIZE[1]-DATA_SIZE[1]%2)//self.factor,) + \
+                (DATA_SIZE[1]-DATA_SIZE[1]%2,)
+        if self.complex_network:
+            return output_shape + (2,)
+        else:
+            return output_shape + (1,)
