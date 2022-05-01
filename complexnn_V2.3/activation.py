@@ -11,6 +11,10 @@ from tensorflow.keras.layers import Layer
 from tensorflow.keras.utils import get_custom_objects
 import tensorflow.keras.backend as K
 
+
+
+
+
 class AmplitudeMaxout(Layer):
     
     def __init__(self, num_pieces=4, name='AMU',**kwargs):
