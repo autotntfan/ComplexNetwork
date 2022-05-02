@@ -2,10 +2,10 @@ clear
 close all
 
 global DR
-DR=60;
+DR = 60;
 
 % loading data
-load('D:/ComplexDataset/simulation_straight/Data_179_delay_2.mat')
+load('D:/ComplexNetwork/simulation_data/Data_30_delay_2.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_185_delay_1.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_396_delay_2.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_322_delay_1.mat')
@@ -22,20 +22,47 @@ figure
 image(20*log10((imag(pred_complex)+1)/2+eps)+DR)
 colormap(gray(DR))
 
-true_complex = normalization(psf_bb(2:4:end,2:2:end));
 
-x_axis = (0:dx:dx*size(psf_bb,2)-dx).*1000;
-z_axis = (depth/2 + (0:dz:dz*size(psf_bb,1)-dz))*1000;
-envelope_rf = envelope_detection(psf_rf,DR);
+
+true_complex = normalization(psf_bb(2:2:end,2:end));
+
+
+x_axis = (0:dx:dx*size(true_complex,2)-dx).*1000;
+z_axis = (depth/2 + (0:2*dz:2*dz*size(true_complex,1)-2*dz))*1000;
+envelope = normalization(abs(psf_bb(2:2:end,2:end)));
+envelope_dB = 20*log10(envelope/max(max(envelope))+eps) + DR;
 figure
-showimg(x_axis,z_axis,envelope_rf)
+showimg(x_axis,z_axis,envelope_dB)
 
+pred_envelope = abs(pred_complex);
+pred_envelope_dB = 20*log10(pred_envelope/max(max(pred_envelope))+eps) + DR;
+figure
+showimg(x_axis, z_axis, pred_envelope_dB)
 % pred_real = readmatrix('D:/ComplexNetwork/realpred_tanh.txt');
 % pred_real = reshape(pred_real,[256,256]);
+pred_ang = angle(pred_complex);
+true_ang = angle(true_complex);
 
+ssim(pred_envelope,envelope,'DynamicRange',1)
+ssim(pred_ang,true_ang,'DynamicRange',2*pi)
+ssim(real(pred_complex),real(true_complex),'DynamicRange',2)
+ssim(imag(pred_complex),imag(true_complex),'DynamicRange',2)
 
-
+angle_err = abs(true_ang - pred_ang);
+figure
+plot(project(pred_envelope_dB,1))
+hold on
+plot(project(envelope_dB,1))
+legend('predict','true')
+figure
+heatmap(angle_err,'Colormap',hot)
 factors = [1 2 4 8];
+figure
+imagesc(x_axis, z_axis, angle_err<0.5)
+colormap(gray(2))
+axis image
+figure
+heatmap(abs(true_ang),'Colormap',hot)
 % for ii = 1:length(factors)
 %     factor = factors(ii);
 %     bb = psf_bb(1:factor:end,:);
@@ -124,7 +151,7 @@ function showimg(xaxis, zaxis, img)
     ylabel('Depth (mm)', 'FontSize', 12)
     xticks('auto')
     yticks('auto')
-    axis square
+    axis image
 end
 
 function showfft(img, fs)
