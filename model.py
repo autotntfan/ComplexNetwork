@@ -7,7 +7,7 @@ Created on Tue Mar 15 22:13:05 2022
 import tensorflow as tf
 import csv
 import os
-from complexnn.activation import cReLU, ctanh, zReLU, modReLU, AmplitudeMaxout
+from complexnn.activation import cReLU, zReLU, modReLU, AmplitudeMaxout, FLeakyReLU
 from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE, SSIM, MS_SSIM, SSIM_MSE
 from complexnn.conv_test import ComplexConv2D
 from complexnn.bn_test import ComplexBatchNormalization
@@ -70,12 +70,13 @@ class Model():
     def build_model(self):
         self.save_info()
         # determine activation function
-        if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU'}:
+        if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU', 'FLeakyReLU'}:
             self.activations = {
                 'cReLU': cReLU,
                 'zReLU': zReLU,
                 'modReLU': modReLU,
                 'LeakyReLU': LeakyReLU,
+                'FLeakyReLU': FLeakyReLU,
                 'AMU'      : AmplitudeMaxout
                 }[self.activations]
         else:
@@ -201,7 +202,7 @@ class Model():
             assert self.input_shape[-1] == 2
             if self.losses not in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE','SSIM','MS_SSIM','SSIM_MSE'}:
                 raise KeyError('Invalid complex-valued loss function')
-            if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU'}:
+            if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU', 'FLeakyReLU'}:
                 raise  KeyError('Unsupported activation')
         else:
             assert self.input_shape[-1] == 1
