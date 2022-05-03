@@ -14,30 +14,22 @@ pred_complex = readmatrix('complexpred.txt');
 pred_complex = reshape(pred_complex,[128,256,2]);
 pred_complex = pred_complex(:,:,1) + 1j.*pred_complex(:,:,2);
 pred_complex = normalization(pred_complex);
-
-figure
-image(20*log10((real(pred_complex)+1)/2+eps)+DR)
-colormap(gray(DR))
-figure 
-image(20*log10((imag(pred_complex)+1)/2+eps)+DR)
-colormap(gray(DR))
-
-
-
 true_complex = normalization(psf_bb(2:2:end,2:end));
-
 
 x_axis = (0:dx:dx*size(true_complex,2)-dx).*1000;
 z_axis = (depth/2 + (0:2*dz:2*dz*size(true_complex,1)-2*dz))*1000;
+
 envelope = normalization(abs(psf_bb(2:2:end,2:end)));
 envelope_dB = 20*log10(envelope/max(max(envelope))+eps) + DR;
 figure
 showimg(x_axis,z_axis,envelope_dB)
+title('ground truth B-mode image')
 
 pred_envelope = abs(pred_complex);
 pred_envelope_dB = 20*log10(pred_envelope/max(max(pred_envelope))+eps) + DR;
 figure
 showimg(x_axis, z_axis, pred_envelope_dB)
+title('predicted B-mode image')
 % pred_real = readmatrix('D:/ComplexNetwork/realpred_tanh.txt');
 % pred_real = reshape(pred_real,[256,256]);
 pred_ang = angle(pred_complex);
@@ -55,14 +47,26 @@ hold on
 plot(project(envelope_dB,1))
 legend('predict','true')
 figure
+heatmap(abs(pred_ang), 'Colormap', hot)
+title('|angle| distribution')
+figure
 heatmap(angle_err,'Colormap',hot)
-factors = [1 2 4 8];
+title('angle difference')
+
+
 figure
 imagesc(x_axis, z_axis, angle_err<0.5)
 colormap(gray(2))
 axis image
+title('binary angle difference')
+
 figure
 heatmap(abs(true_ang),'Colormap',hot)
+title('truth |angle| distribution')
+figure
+heatmap(true_ang,'Colormap',hot)
+title('truth angle distribution')
+factors = [1 2 4 8];
 % for ii = 1:length(factors)
 %     factor = factors(ii);
 %     bb = psf_bb(1:factor:end,:);
