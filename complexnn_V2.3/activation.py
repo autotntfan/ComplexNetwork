@@ -57,7 +57,7 @@ class AmplitudeMaxout(Layer):
         return tuple(shape)
     
     def get_config(self):
-        base_config = super().get_config()
+        base_config = super(AmplitudeMaxout, self).get_config()
         config = {'units': self.num_units,
                   'pieces': self.num_pieces}
         return dict(list(base_config.items()) + list(config.items()))
@@ -119,6 +119,31 @@ class zReLU(Layer):
     
     def compute_output_shape(self, input_shape):
         return input_shape
+
+class FLeakyReLU(Layer):
+    def __init__(self, threshold=1e-2, alpha=0.01,**kwargs):
+        super().__init__(**kwargs)
+        self.threshold = threshold
+        self.alpha = alpha
+        
+    def call(self, inputs):
+        less_than_threshold = tf.multiply(
+            tf.cast(tf.math.less_equal(inputs, -self.threshold),
+                              dtype=tf.float32),self.alpha)
+        greater_than_threshold = tf.cast(tf.math.greater_equal(inputs,
+                                                               self.threshold),
+                                         dtype=tf.float32)
+        return tf.multiply(tf.add(less_than_threshold,greater_than_threshold),inputs)
+
+    def get_config(self):
+        base_config = super().get_config()
+        config = {'threshold': self.threshold,
+                  'alpha': self.alpha}
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
 '''
 ValueError: including someone isn't differentiable, especially
  
@@ -210,11 +235,15 @@ class modReLU(Layer):
         outputs = complexnn.activation.cReLU()(inputs)
         
 '''
-get_custom_objects().update({'zReLU': zReLU()})
-get_custom_objects().update({'cReLU': cReLU()})
-get_custom_objects().update({'cLeakyReLU': cLeakyReLU()})
-get_custom_objects().update({'ctanh': ctanh()})
-get_custom_objects().update({'modReLU': modReLU()})
+get_custom_objects().update({'zReLU': zReLU(),
+                             'cReLU': cReLU(),
+                             'cLeakyReLU': cLeakyReLU(),
+                             'ctanh': ctanh(),
+                             'modReLU': modReLU(),
+                             'FLeakyReLU': FLeakyReLU()})
+
+
+
 
         
     
