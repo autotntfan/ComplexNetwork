@@ -19,7 +19,7 @@ from datetime import datetime
 DIR_SAVED          = r'./modelinfo'
 # DIR_SIMULATION     = r'./simulation_straight'
 DIR_SIMULATION     = r'./simulation_data'
-DATA_SIZE = (1000,257,257)
+DATA_SIZE = (2000,257,257)
 
 def check_data_range(x):
     print(f'the largest value is {np.max(x)} and the smallest one is {np.min(x)}')
@@ -136,7 +136,9 @@ def get_custom_object():
         'ComplexConv2D':complexnn.conv_test.ComplexConv2D,
         'ComplexBatchNormalization':complexnn.bn_test.ComplexBatchNormalization,
         'ComplexMSE':complexnn.loss.ComplexMSE,
-        'ctanh':complexnn.activation.ctanh
+        'ctanh':complexnn.activation.ctanh,
+        'FLeakyRELU_threshold': 0.05,
+        'FLeakyReLU': complexnn.activation.FLeakyReLU
         }
     return custom_object
 
@@ -204,7 +206,7 @@ def _get_axis(img, ind, fs=False):
         level = 4
     else:
         level = (ind+1)%4
-    file_name = 'Data_' + str((ind+1)//4 + 1) + '_delay_' + str(level) + '.mat'
+    file_name = 'Data_' + str(ind//4 + 1) + '_delay_' + str(level) + '.mat'
     print(file_name)
     file_path = os.path.join(DIR_SIMULATION, file_name)
     data = io.loadmat(file_path)
@@ -287,8 +289,67 @@ def show_fft(signal, ind, Aline=False):
     plt.plot(freq_axis,Signal)
     plt.xlabel('MHz')
     plt.show()
+ 
+def show_angle(signal, threshold=None, name=None):
+    if signal.ndim == 4:
+        if signal.shape[0] != 1:
+            raise ValueError('Only support one image')
+        else:
+            signal = signal.reshape(signal.shape[1:])
+    assert signal.ndim == 3
+    if signal.shape[-1]%2:
+        signal = Signal.hilbert(signal, axis=0).reshape(signal.shape[:-1])
+    else:
+        signal = signal[:,:,0] + 1j*signal[:,:,1]
+    angle = np.abs(np.angle(signal))
+    sns.heatmap(angle, cmap='hot')
+    if name is not None:
+        saved_name = os.path.join(DIR_SAVED, name , name + '_angledistribution.png')
+        plt.savefig(saved_name, dpi=300)
+    plt.show()
 
-def phase_diff(y_true, y_pred, name=None):
+
+def distribution(signal):
+    if signal.ndim == 4:
+        if signal.shape[0] != 1:
+            raise ValueError('Only support one image')
+        else:
+            signal = signal.reshape(signal.shape[1:])
+    assert signal.ndim == 3
+    if signal.shape[-1]%2:
+        signal = Signal.hilbert(signal, axis=0).reshape(signal.shape[:-1])
+    else:
+        signal = signal[:,:,0] + 1j*signal[:,:,1]
+    signal = signal/np.max(np.abs(signal))
+    real = np.real(signal)
+    imag = np.imag(signal)
+    return real, imag
+
+def show_distribution(signal1, signal2=None):
+    real1, imag1 = distribution(signal1)
+    if signal2 is not None:
+        real2, imag2 = distribution(signal2)
+        plt.figure()
+        sns.heatmap(np.abs(real1-real2),cmap='Greys')
+        plt.title('real part')
+        plt.show()
+        plt.figure()
+        sns.heatmap(np.abs(imag1-imag2),cmap='Greys')
+        plt.title('imag part')
+        plt.show()
+    else:
+        plt.figure()
+        sns.heatmap(real1, vmin=-1, vmax=1, cmap='Greys')
+        plt.title('real part')
+        plt.show()
+        plt.figure()
+        sns.heatmap(imag1, vmin=-1, vmax=1, cmap='Greys')
+        plt.title('imag part')
+        plt.show()
+    
+            
+            
+def phase_diff(y_true, y_pred, threshold=None, name=None):
     assert y_true.shape == y_pred.shape
     if y_true.ndim == 4:
         if y_true.shape[0] != 1:
@@ -298,17 +359,25 @@ def phase_diff(y_true, y_pred, name=None):
             y_pred = y_true.reshape(y_true.shape[1:])
     assert y_true.ndim == 3
     if y_true.shape[-1]%2:
-        y_true = Signal.hilbert(y_true, axis=0)
-        y_pred = Signal.hilbert(y_pred, axis=0)
+        y_true = Signal.hilbert(y_true, axis=0).reshape(y_pred.shape[:-1])
+        y_pred = Signal.hilbert(y_pred, axis=0).reshape(y_pred.shape[:-1])
     else:
         y_true = y_true[:,:,0] + 1j*y_true[:,:,1]
         y_pred = y_pred[:,:,0] + 1j*y_pred[:,:,1]
     angle_err = np.abs(np.angle(y_true) - np.angle(y_pred))
-    sns.heatmap(angle_err)
+    sns.heatmap(angle_err, cmap='hot')
     if name is not None:
         saved_name = os.path.join(DIR_SAVED, name , name + '_anglediff.png')
         plt.savefig(saved_name, dpi=300)
-
+    plt.show()
+    if threshold is not None:
+        plt.figure()
+        plt.imshow((angle_err<threshold).astype(np.float32),
+                   cmap='gray', vmax=1, vmin=0)
+        if name is not None:
+            saved_name = os.path.join(DIR_SAVED, name , name + '_binarydiff.png')
+            plt.savefig(saved_name, dpi=300)
+        plt.show()
 
 def multimodel(test_img):
     model_set = {
