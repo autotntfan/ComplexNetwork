@@ -8,7 +8,7 @@ import os
 from scipy import io
 import numpy as np
 
-DATA_SIZE = (1000,257,257)
+DATA_SIZE = (2000,257,257)
 
 class DataPreprocessing():
     '''
@@ -103,7 +103,7 @@ class DataPreprocessing():
     
     def __sanitized(self):
         if self.path == r'./simulation_data':
-            assert DATA_SIZE == (1000,257,257)
+            assert DATA_SIZE == (2000,257,257)
         elif self.path == r'./simulation_data':
             assert DATA_SIZE == (1600,513,513)
         else:
@@ -118,7 +118,7 @@ class GetData():
     
     def __init__(self,
                  factor=1,
-                 num_training=800,
+                 num_training=1800,
                  complex_network=True,
                  forward=True,
                  seed=7414):
