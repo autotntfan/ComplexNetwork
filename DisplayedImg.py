@@ -13,30 +13,58 @@ import seaborn as sns
 import pandas as pd
 
 class BasedCompute():
-    
+    '''
+    Basic computation you would utilisze included envelope detection, normalization, 
+    clip image, etc.
+    '''
     def __init__(self,
                  DATA_SIZE=(2000,257,257),
                  DIR_SAVED=r'./modelinfo',
                  DIR_SIMULATION=r'./simulation_data'):
         
-        self.DATA_SIZE = DATA_SIZE
-        self.DIR_SAVED = DIR_SAVED
-        self.DIR_SIMULATION = DIR_SIMULATION
+        self.DATA_SIZE = DATA_SIZE # dataset size
+        self.DIR_SAVED = DIR_SAVED # saving directory 
+        self.DIR_SIMULATION = DIR_SIMULATION # directory of dataset
         
-        self._level = None
+        self._level = None # aberrated level, 1,2,3, or 4.
 
     def gray(self, img, vmax=1, axis=None, title_name=None, model_name=None, saved_name=None):
-        img = self.reduce_dim(img)
+        '''
+        Show grayscale image.
+            Args:
+                img: A numpy array, displayed image has only ONE color channel for grayscale.
+                vmax: An integer, upper limint of displayed range
+                axis: A tuple, displayed axis consists of (xmin, xmax, ymin, ymax)
+                title_name: string, title of plot
+                model_name: string, saving directory of which model
+                saved_name: string, suffix of saved image. e.g. model_name/model_name+suffix.png
+            return:
+                ONLY display gray-scale image
+                
+        '''
+        img = self.reduce_dim(img) # reshape to [H,W]
         plt.figure()
         plt.imshow(img, cmap='gray', vmin=0, vmax=vmax, extent=axis, aspect='auto')
         if title_name is not None:
             plt.title(title_name)
-        self.save_fig(model_name, saved_name)
         plt.colorbar()
+        self.save_fig(model_name, saved_name)
         plt.show()
     
     def heatmap(self, img, title_name=None, model_name=None, saved_name=None):
-        img = self.reduce_dim(img)
+        '''
+        Show heatmap image.
+            Args:
+                img: A numpy array, displayed image has only ONE color channel for grayscale.
+                axis: A tuple, displayed axis consists of (xmin, xmax, ymin, ymax)
+                title_name: string, title of plot
+                model_name: string, saving directory of which model
+                saved_name: string, suffix of saved image. e.g. model_name/model_name+suffix.png
+            return:
+                ONLY display heatmap image
+                
+        '''
+        img = self.reduce_dim(img) # reshape to [H,W]
         plt.figure()
         sns.heatmap(img, cmap='hot')
         if title_name is not None:
@@ -45,26 +73,33 @@ class BasedCompute():
         plt.show()
         
     def normalization(self, inputs):
+        '''
+        Limit input range in the range of [-1,1] for coherent signal, or [0,1]
+        for incoherent signal.
+        
+        '''
         shape = inputs.shape
         rank = inputs.ndim
         if rank == 2:
             # [H,W] in real or complex type
             return inputs/np.max(np.abs(inputs))
         elif rank == 3:
-            # only [H,W,C], [N,H,W] is Not available
+            # only [H,W,C], [N,H,W] is NOT available
             if shape[-1]%2:
-                # real value
+                # real type array
                 return inputs/np.max(np.abs(inputs))
             else:
+                # complex type array
                 real = inputs[:,:,:shape[-1]//2]
                 imag = inputs[:,:,shape[-1]//2:]
                 modulus = np.sqrt(real**2 + imag**2)
                 return inputs/np.max(modulus)
         elif rank == 4:
             if shape[-1]%2:
-                # real [N,H,W,C]
+                # real type array, e.g. [N,H,W,1]
                 return inputs/np.max(np.abs(inputs), axis=(1,2,3), keepdims=True)
             else:
+                # complex type array, e.g. [N,H,W,2]
                 real = inputs[:,:,:,:shape[-1]//2]
                 imag = inputs[:,:,:,shape[-1]//2:]
                 modulus = np.sqrt(real**2 + imag**2)
@@ -85,40 +120,71 @@ class BasedCompute():
         return inputs
     
     def reduce_dim(self, inputs):
-        # convert to 2-D
+        # reduce dim to 2 ->[H,W]
         inputs = self.precheck_dim(inputs)
         output_shape = inputs.shape[1:-1]
         return inputs.reshape(output_shape)
     
     def split_complex(self, x):
+        '''
+        Split complex-valued type or complex-type array to real and imaginary part
+            Args:
+                x: Numpy array, complex-valued or complex-type.
+            Returns:
+                Two numpy array represent real and imaginary part respectively with
+                the same dimension of inputs.
+        '''
+        # for complex-valued type array
+        if np.iscomplex(x).any():
+            return np.real(x), np.imag(x)
         shape = x.shape
         rank = x.ndim
-        if rank == 3:
+        if rank == 2:
+            x = self.convert_to_complex(x)
+            return np.real(x), np.imag(x)
+        elif rank == 3:
+            # for complex-type array
             # only allow [H,W,C]
             if shape[-1]%2:
-                raise ValueError(f'Last channel must be odd for real array but get {shape[-1]}')
+                x = self.convert_to_complex(x)
+                return np.real(x), np.imag(x)
             else:
                 return x[:,:,:shape[-1]//2], x[:,:,shape[-1]//2:]
         elif rank == 4:
             if shape[-1]%2:
-                raise ValueError(f'Last channel must be odd for real array but get {shape[-1]}')
+                x = self.convert_to_complex(x)
+                return np.real(x), np.imag(x)
             else:
                 return x[:,:,:,:shape[-1]//2], x[:,:,:,shape[-1]//2:]
         else:
             raise ValueError(f'Unrecognized complex array with shape {shape}')
     
     def convert_to_complex(self, inputs):
+        '''
+        Convert real-valued input to complex-valued type array.
+            Args:
+                inputs: Numpy array, real-valued or complex-type.
+            Return:
+                complex-valued array with the same dimension of inputs.
+            
+        '''
+        if np.iscomplex(inputs).any():
+            return inputs
         shape = inputs.shape
         rank = inputs.ndim
-        if rank == 3:
+        if rank == 2:
+            return Signal.hilbert(inputs, axis=0)
+        elif rank == 3:
             # only allow [H,W,C]
             if shape[-1]%2:
+                # real-valued signal needs hilbert transform
                 return Signal.hilbert(inputs, axis=0)
             else:
                 real, imag = self.split_complex(inputs)
                 return real + 1j*imag
         elif rank == 4:
             if shape[-1]%2:
+                # real-valued signal needs hilbert transform
                 return Signal.hilbert(inputs, axis=1)
             else:
                 real, imag = self.split_complex(inputs)
@@ -128,6 +194,14 @@ class BasedCompute():
 
     
     def envelope_detection(self, signal, DR=None):
+        '''
+        Detect envelope
+            Args:
+                signal: Numpy array, it could be real or complex type.
+                DR: An integer, dynamic range.
+            Return:
+                Numpy array in dB scale if DR exists, otherwise linear scale.
+        '''
         signal = self.normalization(signal)
         envelope = np.abs(self.convert_to_complex(signal))
         if DR is None:
@@ -136,8 +210,18 @@ class BasedCompute():
             return 20*np.log10(envelope + 1e-16) + DR
 
     def get_axis(self, img, ind, fs=False):
+        '''
+        Getting the image axis or smapling rate.
+            Args: 
+                img: A numpy array. 
+                ind: An integer, the index of image.
+                fs: Boolean.
+            Returns:
+                image axis if fs is false, otherwise the sampling rate.
+        '''
         img = self.precheck_dim(img)
         H, W = img.shape[1:-1]
+        # calculate the aberrated level
         if (ind+1)%4 == 0:
             self._level = 4
         else:
@@ -145,7 +229,7 @@ class BasedCompute():
         file_name = 'Data_' + str(ind//4 + 1) + '_delay_' + str(self._level) + '.mat'
         print(file_name)
         file_path = os.path.join(self.DIR_SIMULATION, file_name)
-        data = io.loadmat(file_path)
+        data = io.loadmat(file_path) # reading file gets information
         dx = data.get('dx') * (self.DATA_SIZE[2]/W)
         dz = data.get('dz') * (self.DATA_SIZE[1]/H)
         depth = data.get('depth')/2
@@ -159,6 +243,13 @@ class BasedCompute():
             return (xmin, xmax, zmax, zmin)
     
     def angle(self, signal):
+        '''
+        Compute the angle (phase) for complex value.
+            Args:
+                signal: Numpy array, complex-valued or real-valued type.
+            Return:
+                Unwrapping angle
+        '''
         complex_signal = self.convert_to_complex(signal)
         wrapped_angle = np.angle(complex_signal)
         if wrapped_angle.ndim == 4:
@@ -172,6 +263,14 @@ class BasedCompute():
             raise ValueError('Values are not in boundary')
             
     def focusing(self, img, ratio=10):
+        '''
+        In order to remove artifacts around edge.
+            Args:
+                img: Numpy array, displayed images.
+                ratio: An integer, clipping ratio of image.
+            Return:
+                Pruned numpy arrays.
+        '''
         shape = img.shape
         if img.ndim == 4:
             H, W = shape[1]//ratio, shape[2]//ratio
@@ -191,11 +290,22 @@ class BasedCompute():
             plt.savefig(name, dpi=300)
     
 class Difference(BasedCompute):
-    
+    '''
+    Compute the difference btw two signal, such as complex distribution or angle.
+    '''
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
     
     def complex_diff(self, signal1, signal2):
+        '''
+        This function estimates the difference of real-part and imaginary-part
+            Args:
+                signal1: Numpy array.
+                signal2: Numpy array, reference signal.
+            Returns:
+                Numpy array,
+                real-part difference, imag-part difference
+        '''
         if signal1.shape != signal2.shape:
             raise ValueError('Inputs are different size')
         signal1 = self.normalization(signal1)
@@ -205,11 +315,31 @@ class Difference(BasedCompute):
         return np.abs(real1 - real2), np.abs(imag1 - imag2)
 
     def phase_diff(self, signal1, signal2):
+        '''
+        This function estimates the difference of angle.
+            Args:
+                signal1: Numpy array.
+                signal2: Numpy array, reference signal.
+            Returns:
+                Numpy array, angle difference
+        '''
         if signal1.shape != signal2.shape:
             raise ValueError('Inputs are different size')
-        return self.reduce_dim(np.abs(self.angle(signal1) - self.angle(signal2)))
+        return np.abs(self.angle(signal1) - self.angle(signal2))
             
     def projection(self, signal, ref=None, DR=60, direction='lateral', model_name=None):
+        '''
+        Lateral projection or axial projection
+            Args:
+                signal: Numpy array.
+                ref: Numpy array, compared signal.
+                DR: An integer, dynamic range, the maximum projected value.
+                direction: String, only 'lateral' or 'axial'.
+                model_name: String, saved directory.
+            Returns:
+                Show the lateral or axial projection. If the ref exists,
+                it draws two projection. Otherwise, only input signal's projection is plotted.
+        '''
         if direction not in {'lateral','axial'}:
             raise ValueError("direction only along 'lateral' or 'axial' ")
         if signal.ndim == 4:
@@ -230,21 +360,40 @@ class Difference(BasedCompute):
             
 
 class Fig(Difference):
-    
+    '''
+    Show different type of image.
+    '''
     def __init__(self, **kwargs):
         super().__init__(**kwargs)      
 
     def envelope_fig(self, img, DR=60, model_name=None, ind=None, saved_name='Bmode'):
+        '''
+        Show the B-mode image in grayscale.
+            Args:
+                img: Numpy array, displayed image.
+                DR: An integer, dynamic range.
+                model_name: String, saved directory.
+                ind: An integer, the index of displayed image. In order to get displayed axis.
+                saved_name: String, saved name.
+        '''
         if ind is not None:
             axis = self.get_axis(img, ind)
         else:
             axis = None
         img = self.envelope_detection(img, DR)
         img = self.reduce_dim(img)
-        saved_name = saved_name + '_' + str(self._level)
+        if self._level is not None:    
+            saved_name = saved_name + '_' + str(self._level)
         self.gray(img, DR, axis, saved_name, model_name, saved_name)
         
     def fft_fig(self, signal, ind, Aline=False):
+        '''
+        Show FFT.
+            Args:
+                img: Numpy array, analyzed image.
+                ind: An integer, the index of displayed image. In order to get sampling rate.
+                Aline: Boolean, only compute the center signal.
+        '''
         # signal shape = [H,W,C]
         fs = self.get_axis(signal, ind, fs=True)
         # signal shape = [H,W]
@@ -261,59 +410,81 @@ class Fig(Difference):
         plt.show()
         
     def angle_fig(self, signal, model_name=None):
+        '''
+        Show phase distribution.
+        '''
         angle = self.reduce_dim(self.angle(signal))           
         self.heatmap(angle.astype(np.float32), 'angle distribution', model_name, 'phase')
         
     def complex_distribution_fig(self, signal, title_='', model_name=None):
+        '''
+        Show real- and imaginary-part distribution.
+        '''
         real, imag = self.split_complex(self.normalization(signal))
         self.heatmap(real, title_ + 'real part distribution', model_name, title_ + 'realdistritbution')
         self.heatmap(imag, title_ + 'imag part distribution', model_name, title_ + 'imagdistritbution')
     
-    def complex_diff_fig(self, img1, img2, title_='complexdiff', DR=None, model_name=None):
+    def complex_diff_fig(self, img1, img2, title_='', DR=None, model_name=None):
+        '''
+        Show real- and imaginary-part difference.
+        '''
         err_real, err_imag = self.complex_diff(img1, img2)
         if DR is not None:
             err_real = 20*np.log10(err_real/2. + 1e-16) + DR
             err_imag = 20*np.log10(err_imag/2. + 1e-16) + DR
             err_real = np.where(err_real<0, 0, err_real)
             err_imag = np.where(err_imag<0, 0, err_imag)
-        self.heatmap(err_real, title_, model_name, 'realpartdiff')
-        self.heatmap(err_imag, title_, model_name, 'imagpartdiff')
+        self.heatmap(err_real, 'real diff ' + str(title_), model_name, 'realpartdiff')
+        self.heatmap(err_imag, 'imag diff ' + str(title_), model_name, 'imagpartdiff')
         
     def phase_diff_fig(self, img1, img2, title_='angle difference', threshold=None, model_name=None):
-        angle_err = self.phase_diff(img1, img2)
+        '''
+        Show pahse difference.
+        '''
+        angle_err = self.reduce_dim(self.phase_diff(img1, img2))
         if threshold is None:
             self.heatmap(angle_err, title_, model_name, 'phasediff')
         else:
             self.heatmap((angle_err<threshold).astype(np.float32), title_, model_name, 'phasebinarydiff')
        
     def error_boxplot(self, pred, truth, OBJ, model_name=None):
+        '''
+        This function evaluates the performance of model, indclued mean squared error and error distribution.
+        The main idea is the real- and imag-part difference. Analize and display the errors. Finally, the best and
+        worst 5 images will be shown.
+            Args:
+                pred: Numpy array, predicted images.
+                truth: Numpy array, ground truth images.
+                OBJ: Class, in order to find the aberrated level of each image.
+                model_name: String, saved directory.
+        '''
         pred = self.focusing(pred)
         truth = self.focusing(truth)
-        err = {
-            "level": [],
-            "maxerror": [],
-            'mse':[],
-            "type": []
-            }
+        levels = []
         for i in range(pred.shape[0]):
             level, _ =  OBJ.find_level(i, train=False)
-            err_real_dist, err_imag_dist = Difference().complex_diff(pred[i], truth[i])
-            err["level"].append(level)
-            err["maxerror"].append(np.max(err_real_dist))
-            err['mse'].append(np.sum(err_real_dist))
-            err["type"].append("real")
-            err["level"].append(level)
-            err["maxerror"].append(np.max(err_imag_dist))
-            err['mse'].append(np.sum(err_imag_dist))
-            err["type"].append("imag")
-        top10error_p = np.argsort(err['maxerror'])[-5:]
-        top10error = top10error_p//2
-        for i, ind in enumerate(top10error):
-            self.complex_diff_fig(pred[ind], truth[ind], title_=str(err['level'][top10error_p[i]]))
+            levels.append(level)
+        err_real_dist, err_imag_dist = Difference().complex_diff(pred, truth)
+        err = {
+            "level":levels*2,
+            "maxerror":np.hstack([np.max(err_real_dist,axis=(1,2,3)),np.max(err_imag_dist,axis=(1,2,3))]),
+            'mse':np.hstack([np.sum(err_real_dist,axis=(1,2,3)),np.sum(err_imag_dist,axis=(1,2,3))]),
+            "type":np.asarray(['real']*(i+1) + ['imag']*(i+1))
+            }
+        meanerr = {
+            'meanerror':(np.max(err_real_dist,axis=(1,2,3))+np.max(err_imag_dist,axis=(1,2,3)))/2,
+            'level':levels
+            }
+        worst3error = np.argsort(meanerr['meanerror'])[-3:]
+        for ind in worst3error:
+            self.complex_diff_fig(pred[ind], truth[ind], title_=str(err['level'][ind]))
             self.envelope_fig(pred[ind])
             self.envelope_fig(truth[ind])
-            
-    
+        best3error = np.argsort(meanerr['meanerror'])[:3]
+        for ind in best3error:
+            self.complex_diff_fig(pred[ind], truth[ind], title_=str(err['level'][ind]))
+            self.envelope_fig(pred[ind])
+            self.envelope_fig(truth[ind])
         df = pd.DataFrame(err)
         plt.figure()
         sns.boxplot(data=df, x='level', y='maxerror', hue='type')
@@ -324,43 +495,18 @@ class Fig(Difference):
         self.save_fig(model_name, 'mseboxplot')
         plt.show()
         plt.figure()
-        plt.plot(err['mse'][::2])
-        plt.plot(err['mse'][1::2])
+        plt.plot(err['mse'][err['type']=='real'])
+        plt.plot(err['mse'][err['type']=='imag'])
         plt.legend(['real','imag'])
         self.save_fig(model_name, 'errordistplot')
         plt.show()
-            
-        # err_real = np.zeros((pred.shape[0],))
-        # err_imag = np.zeros((pred.shape[0],))
-        # levels = np.zeros((pred.shape[0],))
-        # level_err_real = []
-        # level_err_imag = []
-        # try:
-        #     for i in range(pred.shape[0]):
-        #         levels[i], _ =  OBJ.find_level(i, train=False)
-        #         err_real_dist, err_imag_dist = Difference().complex_diff(pred[i], truth[i])
-        #         err_real[i], err_imag[i] = np.max(err_real_dist), np.max(err_imag_dist)
-        #     plt.figure()
-        #     plt.boxplot([err_real,err_imag], labels=['real', 'imag'])
-        #     plt.title('maximum error')
-        #     self.save_fig(model_name, 'errorboxplot')
-        #     plt.show()
-        #     for level in range(1,4):
-        #         level_err_real.append(err_real[levels==level])
-        #         level_err_imag.append(err_imag[levels==level])
-        #     plt.figure()
-        #     plt.boxplot(level_err_real)
-        #     plt.title('real error')
-        #     self.save_fig(model_name, 'realerrorboxplot')
-        #     plt.show()
-        #     plt.figure()
-        #     plt.boxplot(level_err_imag)
-        #     plt.title('imag error')
-        #     self.save_fig(model_name, 'imagerrorboxplot')
-        #     plt.show()
-        # except AttributeError as e:
-        #     print(e)
-            
+        
+        plt.figure()
+        sns.boxplot(data=pd.DataFrame(meanerr), x='level', y='meanerror')
+        self.save_fig(model_name, 'complexerrordistplot')
+        plt.show()
+        return err, meanerr
+   
 class VerifyPred(Fig):
     
     def __init__(self,
@@ -408,8 +554,8 @@ class VerifyPred(Fig):
         self.projection(self.focusing(self._pred_img), self.focusing(self._truth_img), self.DR, 'axial', self.model_name)
         
     def show_phase_diff(self, threshold=None):
-        self.phase_diff_fig(self._pred_img, self._truth_img, 'angle diff' + str(self.ind), threshold, self.model_name)
+        self.phase_diff_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), 'angle diff ' + str(self.ind), threshold, self.model_name)
         
     def show_complex_diff(self, DR=None):
-        self.complex_diff_fig(self._pred_img, self._truth_img, 'complex diff' + str(self.ind), DR, self.model_name)      
+        self.complex_diff_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), 'complex diff ' + str(self.ind), DR, self.model_name)      
 
