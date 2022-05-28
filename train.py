@@ -17,7 +17,7 @@ from train_utils import get_custom_object, get_default
 from train_utils import save_model, save_metrics
 from newdataset import DataPreprocessing, GetData
 from model import Model
-from DisplayedImg import VerifyPred, Fig, Difference, BasedCompute
+from DisplayedImg import VerifyPred, Fig
 import tensorflow as tf
 import numpy as np
 
@@ -25,7 +25,7 @@ import numpy as np
     This file is main script running model and plotting outputs.
 '''
 
-LOAD_MODEL         = False   # whether load pretrained model, True or False
+LOAD_MODEL         = True  # whether load pretrained model, True or False
 FORWARD            = False   # whether use forward UNet or not, True or False
 CALLBACK           = False   # whether add callbacks in model fit, True or False
 COMPLEX            = True  # whether use complex- or real-valued network, True or False
@@ -37,14 +37,14 @@ DECIMATION         = 2      # downsample factor
 FILTERS            = 16      # number of filters for the shallowest conv2D layer
 SIZE               = (3,3)    # size of each Conv2D kernel
 BATCH_SIZE         = 8       # mini-batch size
-LR                 = 5*1e-4    # learning rate of optimizer
+LR                 = 1e-4    # learning rate of optimizer
 EPOCHS             = 200     # training epochs
-VALIDATION_SPLIT   = 0     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
+VALIDATION_SPLIT   = 0.2     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
 NFIG               = 93       # show the n-th fig of speckle, target, or prediction
 DR                 = 60      # dynamic range in dB
 
 ACTIVATION         = 'FLeakyReLU'  # Hidden-layer activation function, it could be 'modeReLU', 'cReLU', ... etc
-LOSS               = 'SSIM'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
+LOSS               = 'SSIM_MSE'  # loss function,it could be 'cMSE', 'cMAE', 'cRMS'
 DIR_SAVED          = r'./modelinfo'
 DIR_SIMULATION     = r'./simulation_data'
 
@@ -89,7 +89,15 @@ if LOAD_MODEL:
             # model_name = 'complexmodel_Notforward_300_SSIM_LeakyReLU_01052022'
             # model_name = 'complexmodel_Notforward_300_SSIM_FLeakyReLU_04052022'
             # model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_08052022'
-            model_name = 'complexmodel_Notforward_198_SSIM_FLeakyReLU_05052022'
+            # model_name = 'complexmodel_Notforward_198_SSIM_FLeakyReLU_05052022'
+            # model_name = 'complexmodel_Notforward_200_MS_SSIM_LeakyReLU_09052022'
+            # model_name = 'complexmodel_Notforward_198_SSIM_FLeakyReLU_11052022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_20052022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_21052022'
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_22052022'
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_FLeakyReLU_22052022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_14052022'
+            model_name = 'complexmodel_Notforward_200_SSIM_MSE_FLeakyReLU_25052022'
         else:
             # model_name = 'realmodel_Notforward_200_MSE_LeakyReLU_30032022'
             # model_name = 'realmodel_Notforward_200_SSIM_LeakyReLU_19042022'
@@ -137,14 +145,15 @@ V = VerifyPred(prediction[NFIG],
                model_name=model_name,
                DIR_SAVED=DIR_SAVED,
                DIR_SIMULATION=DIR_SIMULATION)
-Fig().envelope_fig(x_test[NFIG], DR, model_name, ind, 'speckle' + str(level))
+Fig().envelope_fig(x_test[NFIG], DR, 'speckle' ,ind, model_name, 'speckle' + str(level))
 V.pred_img
 V.truth_img
 V.show_lateral_projection
 V.show_axial_projection
 V.show_complex_diff()
 V.show_phase_diff()
-Fig().error_boxplot(prediction, y_test, get_dataset, model_name)
+Fig().err_fig(prediction, y_test, get_dataset, model_name)
+Fig().topn_err_fig(prediction, y_test, get_dataset, 3, model_name)
 # show_fig(prediction[NFIG], ind, 'prediction' + str(level), DR, model_name)
 # show_fig(y_test[NFIG], ind, 'psf' + str(level), DR, model_name)
 
