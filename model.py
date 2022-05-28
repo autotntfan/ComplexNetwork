@@ -251,9 +251,9 @@ class Model():
             without supporting Forward model
         '''
         if self.validation_rate:
-            num_val = round(x.shape[0]*self.validation_rate)
-            x_train, y_train = x[num_val:], y[num_val:]
-            x_val, y_val = x[:num_val], y[:num_val]
+            num_train = round(x.shape[0]*(1-self.validation_rate))
+            x_train, y_train = x[:num_train], y[:num_train]
+            x_val, y_val = x[num_train:], y[num_train:]
         if self.validation_data:
             x_train, y_train = x, y
             x_val, y_val = self.validation_data
