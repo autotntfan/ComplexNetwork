@@ -164,7 +164,15 @@ class Fig(Difference):
             plt.title(str(diff))
         self.save_fig(*args, **kwargs)
         plt.show()
-    
+        
+    def delay_fig(self, delay, title_name='', *args, **kwargs):
+        plt.figure()
+        plt.plot(delay)
+        plt.xlabel('element')
+        plt.ylabel('delay (pi)')
+        plt.title(title_name)
+        self.save_fig(*args, **kwargs)
+        
     def err_fig(self, pred, truth, OBJ, model_name=None):
         '''
         This function evaluates the performance of model, indclued mean squared error and error distribution.
@@ -178,13 +186,14 @@ class Fig(Difference):
         '''
         pred = self.focusing(pred)
         truth = self.focusing(truth)
-        err, err_split = self.err_statistic(pred, truth, OBJ)
+        err, err_split, _ = self.err_statistic(pred, truth, OBJ)
         # error for different level
         start = 0
         color  = ['pink','hotpink','magenta','m']
         for level in range(1,5):
             level_n_mse = err['sumerr'][err['level'] == level]
             level_n_LBPD = err['LBPD'][err['level'] == level]
+            level_n_ABPD = err['ABPD'][err['level'] == level]
             end = start + level_n_mse.shape[0]
             fig1 = plt.figure(1)
             plt.plot(np.arange(start,end), level_n_mse, color[level-1])
@@ -194,10 +203,15 @@ class Fig(Difference):
             plt.plot(np.arange(start, end), level_n_LBPD, color[level-1])
             plt.plot(np.arange(start, end), np.mean(level_n_LBPD)*np.ones(end-start),'black')
             plt.title('LBPD difference')
+            fig3 = plt.figure(3)
+            plt.plot(np.arange(start, end), level_n_ABPD, color[level-1])
+            plt.plot(np.arange(start, end), np.mean(level_n_ABPD)*np.ones(end-start),'black')
+            plt.title('ABPD difference')          
             start = end
         name = os.path.join(self.DIR_SAVED, model_name, model_name)
         fig1.savefig(name + '_errorleveldist.png', dpi=300)
         fig2.savefig(name + '_LBPDleveldist.png', dpi=300)
+        fig3.savefig(name + '_ABPDleveldist.png', dpi=300)
         plt.show()
         err = pd.DataFrame(err)
         err_split = pd.DataFrame(err_split)
@@ -231,45 +245,76 @@ class Fig(Difference):
         plt.title('LBPD')
         self.save_fig(model_name, 'LBPDboxplot')
         plt.show()
-        
+        # Axial projection error
+        plt.figure()
+        sns.boxplot(data=err, x='level', y='ABPD')
+        plt.title('ABPD')
+        self.save_fig(model_name, 'ABPDboxplot')
+        plt.show()  
+    
     def topn_err_fig(self, pred, truth, OBJ, n=3, model_name=None):
         pred = self.focusing(pred)
         truth = self.focusing(truth)
-        err, _ = self.err_statistic(pred, truth, OBJ)
+        err, _ , delay = self.err_statistic(pred, truth, OBJ)
         worstnerror = np.argsort(err['maxerr'])[-n:]
         kwargs = {
             'model_name':model_name,
             'saved_dir':'projection'
             }
         for ind in worstnerror:
-            name = 'worstmaxerr' + str(ind) + '_L' + str(err['level'][ind])
+            name = 'worstmaxerr' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
             self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+
         bestnerror = np.argsort(err['maxerr'])[:n]
         for ind in bestnerror:
-            name = 'bestmaxerr' + str(ind) + '_L' + str(err['level'][ind])
+            name = 'bestmaxerr' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
             self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs) 
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+        
         worstnerror = np.argsort(err['LBPD'])[-n:]
         for ind in worstnerror:
-            name = 'worstLBPD' + str(ind) + '_L' + str(err['level'][ind])
+            name = 'worstLBPD' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
             self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
         
         bestnerror = np.argsort(err['LBPD'])[:n]
         for ind in bestnerror:
-            name = 'bestLBPD' + str(ind) + '_L' + str(err['level'][ind])
+            name = 'bestLBPD' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
             self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
-   
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+
+        worstnerror = np.argsort(err['ABPD'])[-n:]
+        for ind in worstnerror:
+            name = 'worstABPD' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+            self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
+            self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
+            self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
+            self.project_fig(pred[ind], truth[ind], direction='axial', saved_name=name + '_axial', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+
+        bestnerror = np.argsort(err['ABPD'])[:n]
+        for ind in bestnerror:
+            name = 'bestABPD' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+            self.envelope_fig(pred[ind], title_name=name + '_p', saved_name=name + '_p', **kwargs)
+            self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
+            self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
+            self.project_fig(pred[ind], truth[ind], direction='axial', saved_name=name + '_axial', **kwargs)    
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+
+
 class VerifyPred(Fig):
     
     def __init__(self,
