@@ -75,7 +75,6 @@ class Model():
     def build_model(self, input_shape):
         self.input_shape = input_shape
         self.sanitized()
-        self.save_info()
         # determine activation function
         if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU', 'FLeakyReLU'}:
             self.activations = {
@@ -219,8 +218,8 @@ class Model():
         epochs = str(self.epochs)
         return f'{type_}model_{forward}_{epochs}_{self.losses}_{self.activations}_' + day_month_year
     
-    def save_info(self):
-        saved_var = {
+    def info(self):
+        return {
             'input_shape':self.input_shape,
             'forward':self.forward,
             'callback':self.callbacks,
@@ -231,20 +230,11 @@ class Model():
             'learning_rate':self.lr,
             'batch_size':self.batch_size,
             'epochs':self.epochs,
-            'activation':self.activations,
-            'loss':self.losses,
+            'activation':str(self.activations),
+            'loss':str(self.losses),
             }
-        file_name = self.generate_name()
-        saved_dir = os.path.join(r'./modelinfo', file_name)
-        file_name = file_name + '_parameters.txt'
-        if not os.path.exists(saved_dir):
-            try:
-                os.mkdir(saved_dir)
-            except FileNotFoundError:
-                os.makedirs(saved_dir)
-        saved_path = os.path.join(saved_dir, file_name)
-        with open(saved_path, 'w') as f:
-            f.write(str(saved_var))
+
+
             
     def running(self, x, y):
         '''
