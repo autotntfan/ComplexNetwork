@@ -188,6 +188,7 @@ class GetData(DataPreprocessing):
             train = self.__read_cache(self.dataset[dtype][0])
             test = self.__read_cache(self.dataset[dtype][1])
             assert train.shape == self.__output_shape()
+            assert self.seed == 7414
             return train, test
         except (FileNotFoundError, AssertionError):
             print('File is not found or inaccurate, now creating ......')
@@ -215,6 +216,14 @@ class GetData(DataPreprocessing):
         else:
             level_of_test = level[test_indices]
             return level_of_test[N], test_indices[N]
+        
+    def info(self):
+        saved_var = {
+            'factor':self.factor,
+            'num_training':self.num_training,
+            'seed':self.seed
+            }
+        return saved_var
             
     def __shuffle_data(self):
         self.indices = np.arange(self.DATA_SIZE[0])
@@ -277,3 +286,4 @@ class GetData(DataPreprocessing):
             return output_shape + (2,)
         else:
             return output_shape + (1,)
+        
