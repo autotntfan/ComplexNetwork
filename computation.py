@@ -175,12 +175,8 @@ class BasedCompute():
         '''
         img = self.precheck_dim(img)
         H, W = img.shape[1:-1]
+        file_name = self.get_filename(ind)
         # calculate the aberrated level
-        if (ind+1)%4 == 0:
-            self._level = 4
-        else:
-            self._level = (ind+1)%4
-        file_name = 'Data_' + str(ind//4 + 1) + '_delay_' + str(self._level) + '.mat'
         print(file_name)
         file_path = os.path.join(self.DIR_SIMULATION, file_name)
         data = io.loadmat(file_path) # reading file gets information
@@ -195,6 +191,31 @@ class BasedCompute():
             return 1/(2*dz/1540).reshape([-1])
         else:
             return (xmin, xmax, zmax, zmin)
+        
+    def get_filename(self, ind):
+        '''
+        Arg:
+            ind: int, the i-th simulation data       
+        Return:
+            file_name: string, name of the i-th simulation data
+            
+        '''
+        if (ind+1)%4 == 0:
+            self._level = 4
+        else:
+            self._level = (ind+1)%4
+        file_name = 'Data_' + str(ind//4 + 1) + '_delay_' + str(self._level) + '.mat'
+        return file_name
+        
+    def get_delaycurve(self, ind):
+        file_name = self.get_filename(ind)
+        file_path = os.path.join(self.DIR_SIMULATION, file_name)
+        data = io.loadmat(file_path) # reading file gets information
+        delay = data.get('delay_curve')
+        if self._level != 0:
+            return delay*self._level*np.pi/8
+        else:
+            return delay*0;
     
     def angle(self, signal):
         '''
@@ -252,6 +273,28 @@ class BasedCompute():
                 name = os.path.join(path, saved_name + '.png')
             plt.savefig(name, dpi=300)
             
+    def save_info(self, model_name, saved_var):
+        saved_dir = os.path.join(r'./modelinfo', model_name)
+        file_name = model_name + '_parameters.txt'
+        if not os.path.exists(saved_dir):
+            try:
+                os.mkdir(saved_dir)
+            except FileNotFoundError:
+                os.makedirs(saved_dir)
+        saved_path = os.path.join(saved_dir, file_name)
+        with open(saved_path, 'w') as f:
+            f.write(str(saved_var))
+            
+    def read_info(self, model_name):
+        saved_dir = os.path.join(r'./modelinfo', model_name)
+        file_name = model_name + '_parameters.txt'
+        if not os.path.exists(saved_dir):
+            raise FileNotFoundError('file does not exist')
+        saved_path = os.path.join(saved_dir, file_name)
+        with open(saved_path, 'r') as f:
+            content = f.read()
+        return eval(content)
+       
     def kaverage(self, x, k=3):
         residual = x[:k]
         return np.hstack([residual, np.convolve(x, np.ones((k,))/k)])
@@ -260,15 +303,19 @@ class BasedCompute():
         if direction not in {'lateral','axial'}:
             raise ValueError("direction only along 'lateral' or 'axial' ")
         if signal.ndim == 4:
+            # [N,H,W,C]
             axis = 1 if direction == 'lateral' else 2
         elif signal.ndim < 2 or signal.ndim > 4:
             raise ValueError(f'Unsupport dimension {signal.ndim}')
         else:
+            # [H,W,C] or # [H,W]
             axis = 0 if direction == 'lateral' else 1
         if DR is None:
             return np.max(signal, axis, initial=vmin)
         else:
-            return np.max(self.envelope_detection(signal,DR), axis, initial=vmin)
+            outputs = np.max(self.envelope_detection(signal,DR), axis, initial=vmin)
+            return np.squeeze(outputs, -1)
+        
 
 class Difference(BasedCompute):
     '''
@@ -277,7 +324,7 @@ class Difference(BasedCompute):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
     
-    def complex_diff(self, signal1, signal2):
+    def complex_diff(self, signal1, signal2, normalize=True):
         '''
         This function estimates the difference of real-part and imaginary-part
             Args:
@@ -289,12 +336,12 @@ class Difference(BasedCompute):
         '''
         if signal1.shape != signal2.shape:
             raise ValueError('Inputs are different size')
-        signal1 = self.normalization(signal1)
-        signal2 = self.normalization(signal2)
+        if normalize:
+            signal1 = self.normalization(signal1)
+            signal2 = self.normalization(signal2)
         real1, imag1 = self.split_complex(signal1)
         real2, imag2 = self.split_complex(signal2)
         return np.abs(real1 - real2), np.abs(imag1 - imag2)
-
     def phase_diff(self, signal1, signal2):
         '''
         This function estimates the difference of angle.
@@ -310,20 +357,23 @@ class Difference(BasedCompute):
     
     def BPD(self, signal1, signal2, DR=0, *args, **kwargs):
         assert signal1.shape == signal2.shape
-        diff = np.abs(self.projection(signal1, DR, *args, **kwargs) -
+        diff = np.abs(self.projection(signal1, DR, *args, **kwargs) - 
                       self.projection(signal2, DR, *args, **kwargs))
         if signal1.ndim == 4:
-            return np.mean(diff, axis=(1,2))
+            return np.mean(diff,axis=1)
         else:
             return np.mean(diff)
+
     
-    def err_statistic(self, signal1, signal2, OBJ, *args, training=False, **kwargs):
+    def err_statistic(self, signal1, signal2, OBJ, *args, normalize=True, training=False, **kwargs):
         assert signal1.shape == signal2.shape
         levels = np.zeros(signal1.shape[0], int)
         inds = np.zeros(signal1.shape[0], int)
+        delay = np.zeros((signal1.shape[0],128))
         for i in range(signal1.shape[0]):
             levels[i], inds[i] = OBJ.find_level(i, train=training)
-        err_real_dist, err_imag_dist = self.complex_diff(signal1, signal2)
+            delay[i] = self.get_delaycurve(inds[i])
+        err_real_dist, err_imag_dist = self.complex_diff(signal1, signal2, normalize)
         err_split = {
             'level':np.tile(levels,2),
             'maxerr':np.hstack([np.max(err_real_dist,axis=(1,2,3)),np.max(err_imag_dist,axis=(1,2,3))]),
@@ -335,6 +385,12 @@ class Difference(BasedCompute):
             'maxerr':(np.max(err_real_dist,axis=(1,2,3))+np.max(err_imag_dist,axis=(1,2,3)))/2,
             'sumerr':(np.sum(err_real_dist,axis=(1,2,3)) + np.sum(err_real_dist,axis=(1,2,3)))/2,
             'LBPD':self.BPD(signal1, signal2, *args, **kwargs),
-            'level':levels
+            'ABPD':self.BPD(signal1, signal2, direction='axial', *args, **kwargs),
+            'level':levels,
+            'ind':inds
             }
-        return err, err_split
+        delay = {
+            'delay':delay,
+            'ind':inds
+            }
+        return err, err_split, delay
