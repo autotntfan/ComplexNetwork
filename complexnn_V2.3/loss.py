@@ -51,8 +51,8 @@ def ComplexMAE(y_true, y_pred):
 
     '''
     y_true, y_pred = _precheck(y_true, y_pred)
-    mae = MeanAbsoluteError()
-    return mae(y_true, y_pred)
+    mae = tf.math.sqrt(_get_square_error(y_true, y_pred))
+    return tf.reduce_mean(mae)
 
 
 # def _feature_size(x):
@@ -233,7 +233,7 @@ def MS_SSIM(y_true,y_pred):
     
 def SSIM_MSE(y_true,y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    ratio = 0.02
+    ratio = 0.75
     if y_pred.shape[-1]%2:
         mse = MeanSquaredError()
         mse = mse(y_true, y_pred)
