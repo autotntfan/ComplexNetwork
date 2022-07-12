@@ -12,24 +12,52 @@ from scipy    import io
 
 class BasedCompute():
     '''
-    Basic computation you would utilisze included envelope detection, normalization, 
-    clip image, etc.
+    Basic computation you would utilisze included
+    normalization: normalize data into a specific range, 
+                   e.g. [-1,1] for baseband data.
+    precheck_dim: expand dimension to 4, i.e. [H,W] -> [N,H,W,C].
+    reduce_dim: squeeze dimension to 2, i.e. [N,H,W,C] -> [H,W].
+    split_complex: split complex value x=a+bi to Re{x}=a and Im{x}=b.
+    convert_to_complex: convert real value, e.g. RF data, or complex value,
+                        e.g. 2-channel BB data, into complex type value a+bi.
+    envelope_detection: turn RF data into envelope data with gain or dynamic range.
+    get_axis: obtain the physical location of patch.
+    get_filename: search the file name of the "i-th" data,
+                 e.g. index=93, file_name is Data_24_delay_2.mat.
+    get_delaycurve: obtain the i-th data's corresponding delay profile.
+    angle: obtain the i-th data's angle distribution in rad.
+    check_data_range: check the input data's range is valid.
+    focusing: clip the edge to prevent white artifact due 
+              to the Gaussian filter in loss function SSIM.
+    save_fig: save figure.
+    save_info: save model information included parameters.
+    read_info: read the file saved by save_info
+    projection: obtain lateral or axial projection
+    
+    last edit 2022/07/01
+    
     '''
     def __init__(self,
                  DATA_SIZE=(2000,257,257),
                  DIR_SAVED=r'./modelinfo',
                  DIR_SIMULATION=r'./simulation_data'):
         
-        self.DATA_SIZE = DATA_SIZE # dataset size
-        self.DIR_SAVED = DIR_SAVED # saving directory 
+        self.DATA_SIZE = DATA_SIZE # dataset size, i.e. RF or BB data size
+        self.DIR_SAVED = DIR_SAVED # saving directory
         self.DIR_SIMULATION = DIR_SIMULATION # directory of dataset
         
         self._level = None # aberrated level, 1,2,3, or 4.
         
     def normalization(self, inputs):
         '''
-        Limit input range in the range of [-1,1] for coherent signal, or [0,1]
+        Limit input in the range of [-1,1] for coherent signal, or [0,1]
         for incoherent signal.
+        
+        Args:
+            inputs: ndarray, in the shape of [N,H,W,C], [H,W,C], [H,W]
+        
+        Return:
+            ndarray, max value = orignal value/abs(max value) along each data
         
         '''
         shape = inputs.shape
@@ -74,7 +102,7 @@ class BasedCompute():
         return inputs
     
     def reduce_dim(self, inputs):
-        # reduce dim to 2 ->[H,W]
+        # reduce any dim to 2 ->[H,W]
         inputs = self.precheck_dim(inputs)
         output_shape = inputs.shape[1:-1]
         return inputs.reshape(output_shape)
@@ -87,6 +115,15 @@ class BasedCompute():
             Returns:
                 Two numpy array represent real and imaginary part respectively with
                 the same dimension of inputs.
+        
+        Example:
+            input = complex type BB data, output = Re{BB}, Im{BB}
+            i.e. a+bi -> a,b
+            
+            input = real type RF data, output = Re{BB}, Im{BB}
+            i.e. z -> a,b
+            
+            input = 2-channel real type BB data, output = first channel, second channel
         '''
         # for complex-valued type array
         if np.iscomplex(x).any():
@@ -121,6 +158,12 @@ class BasedCompute():
             Return:
                 complex-valued array with the same dimension of inputs.
             
+        Example:
+            input = RF data, output = complex type BB data (a+bi)
+            
+            input = 2-channel real type BB data, output = complex type BB data (a+bi)
+            
+            input = complex type BB data, output = complex type BB data
         '''
         if np.iscomplex(inputs).any():
             return inputs
@@ -149,12 +192,22 @@ class BasedCompute():
     
     def envelope_detection(self, signal, DR=None):
         '''
-        Detect envelope
+        Detect envelope, where gain is equivalent to dynamic range. However, actually
+        gain is not equal to DR always. It should be envelope_detection(self, signal, DR, gain).
+        
+        *The log(0) is undefined, hence that is added by 1e-16, i.e. at least -320 dB.
+        
+        *Before log compression, data has been normalized since we implement SSIM loss which
+        has to limit prediction and reference in the same value range, e.g. [-1,1], but model
+        prediction DO NOT pass through loss that value range is not in [-1,1]. Accordingly, here 
+        we have to implement normalization to preserve its range is valid and further comparsion
+        to be fair.
             Args:
                 signal: Numpy array, it could be real or complex type.
                 DR: An integer, dynamic range.
             Return:
                 Numpy array in dB scale if DR exists, otherwise linear scale.
+        
         '''
         signal = self.normalization(signal)
         envelope = np.abs(self.convert_to_complex(signal))
@@ -165,7 +218,8 @@ class BasedCompute():
 
     def get_axis(self, img, ind, fs=False):
         '''
-        Getting the image axis or smapling rate.
+        Getting the physical axis or smapling rate. obtain the
+        information about depth, dx, dz, or even sampling rate.
             Args: 
                 img: A numpy array. 
                 ind: An integer, the index of image.
@@ -208,12 +262,13 @@ class BasedCompute():
         return file_name
         
     def get_delaycurve(self, ind):
+        # obtain delay profile
         file_name = self.get_filename(ind)
         file_path = os.path.join(self.DIR_SIMULATION, file_name)
         data = io.loadmat(file_path) # reading file gets information
         delay = data.get('delay_curve')
-        if self._level != 0:
-            return delay*self._level*np.pi/8
+        if self._level != 1:
+            return delay*self._level/8
         else:
             return delay*0;
     
@@ -237,35 +292,48 @@ class BasedCompute():
         if np.max(x) > maxv or np.min(x) < minv:
             raise ValueError('Values are not in boundary')
             
-    def focusing(self, img, ratio=10):
+    def focusing(self, img, ratio=0.05):
         '''
         In order to remove artifacts around edge.
             Args:
                 img: Numpy array, displayed images.
-                ratio: An integer, clipping ratio of image.
+                ratio: A decimal, clipping ratio of image.
             Return:
                 Pruned numpy arrays.
         '''
+        if ratio <= 0 or ratio >= 1:
+            raise ValueError('ratio is out of boundary')
         shape = img.shape
         if img.ndim == 4:
-            H, W = shape[1]//ratio, shape[2]//ratio
+            H, W = round(shape[1]*ratio), round(shape[2]*ratio)
             return img[:,H:-H,W:-W,:]
         elif img.ndim == 3:
-            H, W = shape[0]//ratio, shape[1]//ratio
+            H, W = round(shape[0]*ratio), round(shape[1]*ratio)
             return img[H:-H,W:-W,:]
         elif img.ndim == 2:
-            H, W = shape[0]//ratio, shape[1]//ratio
+            H, W = round(shape[0]*ratio), round(shape[1]*ratio)
             return img[H:-H,W:-W]
         else:
             raise ValueError(f'Unrecognized complex array with shape {shape}')
             
     def save_fig(self, model_name=None, saved_name=None, saved_dir=None):
+        '''
+        save figure to specific path
+        Args:
+            String
+            model_name: model path
+            saved_name: desired name to be saved
+            saved_dir: desired directory would be built if it does not exist
+            
+        '''
         if model_name and saved_name:
+            # fig is saved only if model_name and saved_name are given
             if saved_dir is None:
                 name = os.path.join(self.DIR_SAVED, model_name, model_name + '_' + saved_name + '.png')
             else:
                 path = os.path.join(self.DIR_SAVED, model_name, saved_dir)
                 if not os.path.exists(path):
+                    # if directory doesn't exist then built
                     try:
                         os.mkdir(path)
                     except FileNotFoundError:
@@ -274,6 +342,13 @@ class BasedCompute():
             plt.savefig(name, dpi=300)
             
     def save_info(self, model_name, saved_var):
+        '''
+        save the information of parameters and model, included 
+        epoch. seed. and so on
+        Args:
+            model_name: saved path
+            saved_var: parameters to be preserved
+        '''
         saved_dir = os.path.join(r'./modelinfo', model_name)
         file_name = model_name + '_parameters.txt'
         if not os.path.exists(saved_dir):
@@ -286,20 +361,34 @@ class BasedCompute():
             f.write(str(saved_var))
             
     def read_info(self, model_name):
+        '''
+         reading the information saved by save_info function
+         this function is in order to check whether the given
+         augments are compatible with loaded model
+        '''
         saved_dir = os.path.join(r'./modelinfo', model_name)
         file_name = model_name + '_parameters.txt'
         if not os.path.exists(saved_dir):
             raise FileNotFoundError('file does not exist')
         saved_path = os.path.join(saved_dir, file_name)
         with open(saved_path, 'r') as f:
-            content = f.read()
-        return eval(content)
+            content = f.read() # type of content is string
+        return eval(content) # convert string to dict
        
-    def kaverage(self, x, k=3):
-        residual = x[:k]
-        return np.hstack([residual, np.convolve(x, np.ones((k,))/k)])
-
     def projection(self, signal, DR=None, direction='lateral', vmin=None):
+        '''
+        Axial or lateral projection of signal
+        Args:
+            signal: ndarray, target
+            DR: dynamic range
+            direction: string, only allow 'lateral' and 'axial'
+            vmin: the minimum value of projection,
+                i.e. vmin=0, DR=60 then value<0 would be forced to 0
+                and the max value is 60
+        Return:
+            1-D/2-D projection data along axial or lateral determined
+            by input sequence.
+        '''
         if direction not in {'lateral','axial'}:
             raise ValueError("direction only along 'lateral' or 'axial' ")
         if signal.ndim == 4:
@@ -311,8 +400,10 @@ class BasedCompute():
             # [H,W,C] or # [H,W]
             axis = 0 if direction == 'lateral' else 1
         if DR is None:
+            # directly applied projection without log compression
             return np.max(signal, axis, initial=vmin)
         else:
+            # do log compression depending on DR
             outputs = np.max(self.envelope_detection(signal,DR), axis, initial=vmin)
             return np.squeeze(outputs, -1)
         
@@ -356,6 +447,7 @@ class Difference(BasedCompute):
         return np.abs(self.angle(signal1) - self.angle(signal2))
     
     def BPD(self, signal1, signal2, DR=0, *args, **kwargs):
+        # beampattern projection difference
         assert signal1.shape == signal2.shape
         diff = np.abs(self.projection(signal1, DR, *args, **kwargs) - 
                       self.projection(signal2, DR, *args, **kwargs))
@@ -363,7 +455,44 @@ class Difference(BasedCompute):
             return np.mean(diff,axis=1)
         else:
             return np.mean(diff)
-
+    
+    def IOU(self, signal1, signal2, DR=60):
+        '''
+        Calculate the ratio of intersection versus union sets, i.e. IOU = A and B / A or B
+        
+        Args:
+            signal1: Numpy array with shape [N,H,W,C] or [H,W,C]
+            signal2: Numpy array with shape [N,H,W,C] or [H,W,C]
+            DR: Int, dynmaic range
+            
+        Return:
+            N-by-M ndarray, where DR is divided into M intervals, e.g. DR=70, M=5, included
+            ~0, 0~20, 20~40, 40~60, 60~70 dB. Each column contains N samples' IOU value during 
+            specific range.
+        '''
+        if signal1.shape != signal2.shape:
+            raise ValueError('Inputs are different size')
+        signal1 = self.envelope_detection(signal1, DR)
+        signal2 = self.envelope_detection(signal2, DR)
+        axis = (1,2,3) if signal1.ndim == 4 else None
+        DRs = [20*ii for ii in range(DR//20+1)]
+        DRs = DRs + [DR] if DR%20 else DRs
+        mask1 = np.zeros((len(DRs),) + signal1.shape)
+        mask2 = np.zeros((len(DRs),) + signal1.shape)
+        print(mask1.shape)
+        for ii, DRmax in enumerate(DRs):
+            if DRmax == 0:
+                mask1[ii,:] = signal1 < 0
+                mask2[ii,:] = signal2 < 0
+                iou = np.sum(np.logical_and(signal1 < 0, signal2 < 0), axis=axis) / \
+                    np.sum(np.logical_or(signal1 < 0, signal2 < 0), axis=axis)
+            else:
+                S1 = np.logical_and(signal1 > DRs[ii-1], signal1 <= DRmax)
+                S2 = np.logical_and(signal2 > DRs[ii-1], signal2 <= DRmax)
+                mask1[ii,:] = S1
+                mask2[ii,:] = S2
+                iou = np.vstack([iou,np.sum(np.logical_and(S1, S2), axis=axis)/np.sum(np.logical_or(S1, S2), axis=axis)])
+        return np.nan_to_num(iou,nan=0.0), DRs, np.squeeze(mask1), np.squeeze(mask2)
     
     def err_statistic(self, signal1, signal2, OBJ, *args, normalize=True, training=False, **kwargs):
         assert signal1.shape == signal2.shape
@@ -393,4 +522,5 @@ class Difference(BasedCompute):
             'delay':delay,
             'ind':inds
             }
+        
         return err, err_split, delay
