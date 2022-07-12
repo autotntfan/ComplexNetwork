@@ -171,6 +171,7 @@ class Fig(Difference):
         plt.xlabel('element')
         plt.ylabel('delay (pi)')
         plt.title(title_name)
+        plt.ylim((-0.3,0.3))
         self.save_fig(*args, **kwargs)
         
     def err_fig(self, pred, truth, OBJ, model_name=None):
