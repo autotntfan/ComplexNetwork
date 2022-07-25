@@ -5,9 +5,10 @@ Created on Tue Mar 15 22:13:05 2022
 @author: benzener
 """
 import tensorflow as tf
-import csv
 import os
-from complexnn.activation import cReLU, ctanh, zReLU, modReLU, AmplitudeMaxout
+import numpy as np
+import time
+from complexnn.activation import cReLU, zReLU, modReLU, AmplitudeMaxout, FLeakyReLU
 from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE, SSIM, MS_SSIM, SSIM_MSE
 from complexnn.conv_test import ComplexConv2D
 from complexnn.bn_test import ComplexBatchNormalization
@@ -19,15 +20,17 @@ from datetime import datetime
 class Model():
     
     def __init__(self,
-                 filters=16,
+                 filters=4,
                  size=(3,3),
                  batch_size=2,
                  lr=1e-4,
-                 epochs=2,
+                 epochs=8,
                  validation_split=0.2,
+                 validation_data=None,
                  seed=7414,
                  activations='LeakyReLU',
                  losses='ComplexMSE',
+                 forward=False,
                  apply_batchnorm=True,
                  dropout_rate=None,
                  callbacks=None,
@@ -38,6 +41,7 @@ class Model():
         self.lr = lr
         self.epochs = epochs
         self.validation_rate = validation_split
+        self.validation_data = validation_data
         self.seed = seed
         self.activations = activations
         self.losses = losses
@@ -46,43 +50,44 @@ class Model():
         self.callbacks = callbacks
         self.complex_network = complex_network
         
-        self.input_shape = None
-        self.forward = False
+        self.forward = forward
         
     
     def __call__(self, x, y):
         # check input is forward or not forward and get input_shape
         if isinstance(x,list):
-            self.input_shape = x[0].shape[1:]
+            input_shape = x[0].shape[1:]
             self.forward = True
         else:
-            self.input_shape = x.shape[1:]
-        self.sanitized()          
-        model = self.build_model()
+            input_shape = x.shape[1:]       
+        model = self.build_model(input_shape)
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr), loss=self.losses)
+        model.summary()
         history = model.fit(x, y,
                             validation_split=self.validation_rate,
+                            validation_data=self.validation_data,
                             batch_size=self.batch_size,
                             verbose=2,
                             epochs=self.epochs,
                             callbacks=self.callbacks)
         return model, history
         
-    def build_model(self):
-        self.save_info()
+    def build_model(self, input_shape):
+        self.input_shape = input_shape
+        self.sanitized()
         # determine activation function
-        if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU'}:
+        if self.activations in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU', 'FLeakyReLU'}:
             self.activations = {
                 'cReLU': cReLU,
                 'zReLU': zReLU,
                 'modReLU': modReLU,
                 'LeakyReLU': LeakyReLU,
+                'FLeakyReLU': FLeakyReLU,
                 'AMU'      : AmplitudeMaxout
                 }[self.activations]
         else:
             if isinstance(self.activations, str):
                 raise KeyError('activation function is not defined')
-
-        
         # determine loss function 
         if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE', 'SSIM', 'MSE','MS_SSIM' ,'SSIM_MSE'}:
             self.losses = {
@@ -93,15 +98,10 @@ class Model():
                 'MS_SSIM'   : MS_SSIM,
                 'SSIM_MSE'  : SSIM_MSE,
                 'MSE'       : MeanSquaredError()
-                }[self.losses]
-            
+                }[self.losses]         
         self.convFunc = ComplexConv2D if self.complex_network else Conv2D
         self.bnFunc = ComplexBatchNormalization if self.complex_network else BatchNormalization
-        
-        model = self.UNet()
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr), loss=self.losses)
-        model.summary()
-        return model
+        return self.core()
             
     def downsample(self, filters, size):
         
@@ -137,7 +137,7 @@ class Model():
         result.add(self.activations())
         return result
         
-    def UNet(self):
+    def core(self):
         tf.random.set_seed(self.seed)
         inputs = Input(self.input_shape)
         if self.forward:
@@ -190,7 +190,7 @@ class Model():
             x = Concatenate(axis=-1)((x, inputs_forward))
             x = self.convFunc(2, 3, padding='same', use_bias=False)(x)
             x = self.bnFunc()(x)
-            x = tanh(x)
+            x = tf.keras.layers.LeakyReLU()(x)
             return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
         else:    
             x = tf.keras.layers.LeakyReLU()(x)
@@ -201,13 +201,13 @@ class Model():
             assert self.input_shape[-1] == 2
             if self.losses not in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE','SSIM','MS_SSIM','SSIM_MSE'}:
                 raise KeyError('Invalid complex-valued loss function')
-            if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU'}:
+            if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'LeakyReLU', 'AMU', 'FLeakyReLU'}:
                 raise  KeyError('Unsupported activation')
         else:
             assert self.input_shape[-1] == 1
             if self.losses not in {'MSE','SSIM', 'MS_SSIM', 'SSIM_MSE'}:
                 raise KeyError('Invalid real-valued loss function')
-            if self.activations not in {'LeakyReLU'}:
+            if self.activations not in {'LeakyReLU','FLeakyReLU'}:
                 raise  KeyError('Unsupported activation')
     
     def generate_name(self):
@@ -218,8 +218,8 @@ class Model():
         epochs = str(self.epochs)
         return f'{type_}model_{forward}_{epochs}_{self.losses}_{self.activations}_' + day_month_year
     
-    def save_info(self):
-        saved_var = {
+    def info(self):
+        return {
             'input_shape':self.input_shape,
             'forward':self.forward,
             'callback':self.callbacks,
@@ -230,29 +230,58 @@ class Model():
             'learning_rate':self.lr,
             'batch_size':self.batch_size,
             'epochs':self.epochs,
-            'activation':self.activations,
-            'loss':self.losses,
+            'activation':str(self.activations),
+            'loss':str(self.losses),
             }
-        file_name = self.generate_name()
-        saved_dir = os.path.join(r'./modelinfo', file_name)
-        file_name = file_name + '_parameters.txt'
-        if not os.path.exists(saved_dir):
-            try:
-                os.mkdir(saved_dir)
-            except FileNotFoundError:
-                os.makedirs(saved_dir)
-        saved_path = os.path.join(saved_dir, file_name)
-        with open(saved_path, 'w') as f:
-            f.write(str(saved_var))
-        
+
+
             
-            
-        
-
-
-
-        
-        
-        
-        
-        
+    def running(self, x, y):
+        '''
+            without supporting Forward model
+        '''
+        if self.validation_rate:
+            num_train = round(x.shape[0]*(1-self.validation_rate))
+            x_train, y_train = x[:num_train], y[:num_train]
+            x_val, y_val = x[num_train:], y[num_train:]
+        if self.validation_data:
+            x_train, y_train = x, y
+            x_val, y_val = self.validation_data
+        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(self.batch_size)
+        valid_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(self.batch_size)
+        self.model = self.build_model(x_train.shape[1:])
+        self.model.summary()
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
+        history = {
+            'loss':[],
+            'val_loss':[]
+            }
+        for epoch in range(self.epochs):
+            s = time.time()
+            loss_train_epoch = []
+            loss_valid_epoch = []
+            for step, (x_batch_train, y_batch_train) in enumerate(train_dataset):
+                loss_train_epoch.append(self.train_step(x_batch_train, y_batch_train))
+            history['loss'].append(np.mean(loss_train_epoch))
+            for x_batch_val, y_batch_val in valid_dataset:
+                loss_valid_epoch.append(self.test_step(x_batch_val, y_batch_val))
+            history['val_loss'].append(np.mean(loss_valid_epoch))
+            e = time.time()
+            print(f'{epoch+1}/{self.epochs} - {(e-s):.2f}s - ' \
+                  f'loss:{np.mean(loss_train_epoch):.4e} - ' \
+                  f'val_loss:{np.mean(loss_valid_epoch):.4e} \n')
+        return self.model, history
+    
+    @tf.function
+    def train_step(self, x, y):
+        with tf.GradientTape() as tape:
+            result = self.model(x, training=True)
+            loss_value = self.losses(y, result)
+        grads = tape.gradient(loss_value, self.model.trainable_weights)
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
+        return loss_value
+    
+    @tf.function
+    def test_step(self, x, y):
+        val_result = self.model(x, training=False)
+        return self.losses(y, val_result)

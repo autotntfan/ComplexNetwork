@@ -51,8 +51,8 @@ def ComplexMAE(y_true, y_pred):
 
     '''
     y_true, y_pred = _precheck(y_true, y_pred)
-    mae = MeanAbsoluteError()
-    return mae(y_true, y_pred)
+    mae = tf.math.sqrt(_get_square_error(y_true, y_pred))
+    return tf.reduce_mean(mae)
 
 
 # def _feature_size(x):
@@ -210,19 +210,13 @@ def _SSIM_core(y_true, y_pred, func):
     '''
     if y_pred.shape[-1]%2:
         y_pred = _normalization(y_pred)
-        return 1 - tf.reduce_mean(func(y_pred,y_true,max_val=2,filter_size=7))
+        return 1 - tf.reduce_mean(func(y_pred,y_true,max_val=2,filter_size=15))
     else:
         # envelope_true = _envelope_detection(y_true)
         # envelope_pred = _envelope_detection(y_pred)
         # return 1 - tf.reduce_mean(func(envelope_pred,envelope_true,max_val=1,filter_size=7))
         y_pred = _normalization(y_pred)
-        real_pdt = get_realpart(y_pred) + 1
-        imag_pdt = get_imagpart(y_pred) + 1
-        real_true = get_realpart(y_true) + 1
-        imag_true = get_imagpart(y_true) + 1
-        imag_ssim = 1 - tf.reduce_mean(func(imag_pdt,imag_true,max_val=2,filter_size=9))
-        real_ssim = 1 - tf.reduce_mean(func(real_pdt,real_true,max_val=2,filter_size=9))
-        return (imag_ssim + real_ssim)/2
+        return 1 - tf.reduce_mean(func(y_pred+1, y_true+1, max_val=2,filter_size=15))
         # pi = 2*tf.acos(0.)
         # angle_ssim = 1 - tf.reduce_mean(func(_angle(y_pred),_angle(y_true),max_val=2*pi,filter_size=7))
         # envelope_ssim = 1 - tf.reduce_mean(func(envelope_pred,envelope_true,max_val=1,filter_size=7))
@@ -239,25 +233,16 @@ def MS_SSIM(y_true,y_pred):
     
 def SSIM_MSE(y_true,y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
-    ratio = 0.2
+    ratio = 0.75
     if y_pred.shape[-1]%2:
         mse = MeanSquaredError()
         mse = mse(y_true, y_pred)
     else:
-        mse = MeanSquaredError()
-        mse = mse(PI + _angle(y_true),PI + _angle(y_pred))
-        # mse = ComplexMSE(y_true, y_pred)
+        mse = ComplexMSE(y_true, y_pred)
     ssim = SSIM(y_true,y_pred)
-    return ssim + mse
+    return ratio*ssim + mse
     # return ssim*mse
-    
+
 get_custom_objects().update({'SSIM': SSIM,
                              'MS_SSIM': MS_SSIM,
                              'SSIM_MSE': SSIM_MSE})
-
-
-
-
-
-
-

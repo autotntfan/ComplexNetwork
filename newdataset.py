@@ -8,8 +8,6 @@ import os
 from scipy import io
 import numpy as np
 
-DATA_SIZE = (1000,257,257)
-
 class DataPreprocessing():
     '''
         Save speckle and psf in rf or BB.
@@ -38,12 +36,13 @@ class DataPreprocessing():
         Hence, here name four array directly ensuring memory would be sufficient and run efficiently.
 
         '''
-        self.__sanitized()     # check data size is compatible with dataset  
         file_name = os.listdir(self.path)
-        psf_bb = np.zeros(DATA_SIZE, dtype=complex)
-        psf_rf = np.zeros(DATA_SIZE)
-        speckle_bb = np.zeros(DATA_SIZE,dtype=complex)
-        speckle_rf = np.zeros(DATA_SIZE)
+        self.DATA_SIZE = self.get_data_size(file_name)
+        self.__sanitized() # check data size is compatible with dataset  
+        psf_bb = np.zeros(self.DATA_SIZE, dtype=complex)
+        psf_rf = np.zeros(self.DATA_SIZE)
+        speckle_bb = np.zeros(self.DATA_SIZE,dtype=complex)
+        speckle_rf = np.zeros(self.DATA_SIZE)
         # read psf and speckle in sequence
         for i, name in enumerate(file_name):
             if name.split('.')[-1] in {'py','png'}:
@@ -103,37 +102,50 @@ class DataPreprocessing():
     
     def __sanitized(self):
         if self.path == r'./simulation_data':
-            assert DATA_SIZE == (1000,257,257)
+            assert self.DATA_SIZE == (2000,257,257)
         elif self.path == r'./simulation_data':
-            assert DATA_SIZE == (1600,513,513)
+            assert self.DATA_SIZE == (1600,513,513)
         else:
             raise ValueError('Unsupport path')
             
+    def get_data_size(self, file_name):
+        num = 0
+        for i, name in enumerate(file_name):
+            if name.split('.')[-1] in {'py','png'}:
+                continue
+            else:
+                num += 1
+                file_path = os.path.join(self.path, name)
+        data = io.loadmat(file_path)
+        shape = data.get('psf_bb').shape
+        return (num,) + shape
+            
 
-class GetData():
+class GetData(DataPreprocessing):
     # return training, testing data , and even ideal psf
-   
-    NUM_DATA = DATA_SIZE[0]
-    DIRETORY = r'./parameters'
-    
     def __init__(self,
                  factor=1,
-                 num_training=800,
+                 num_training=1800,
                  complex_network=True,
                  forward=True,
-                 seed=7414):
+                 seed=7414,
+                 DIRETORY=r'./parameters',
+                 **kwargs):
+        super().__init__(**kwargs)
         self.factor = factor
         self.num_training = num_training
         self.complex_network = complex_network
         self.forward = forward
         self.seed = seed
+        self.DIRETORY  = DIRETORY
     
         self.indices = None
         self.dataset = None
+        self.DATA_SIZE = self.get_data_size(os.listdir(self.path))
         
     def __call__(self):
-        if self.num_training > self.NUM_DATA:
-            raise ValueError(f"Dataset only has {self.NUM_DATA} samples but requires {self.num_training} training data")
+        if self.num_training > self.DATA_SIZE[0]:
+            raise ValueError(f"Dataset only has {self.DATA_SIZE[0]} samples but requires {self.num_training} training data")
         # select rf or BB data
         if self.complex_network:
             dtype = ['speckle_bb', 'psf_bb']
@@ -176,6 +188,7 @@ class GetData():
             train = self.__read_cache(self.dataset[dtype][0])
             test = self.__read_cache(self.dataset[dtype][1])
             assert train.shape == self.__output_shape()
+            assert self.seed == 7414
             return train, test
         except (FileNotFoundError, AssertionError):
             print('File is not found or inaccurate, now creating ......')
@@ -195,7 +208,7 @@ class GetData():
     
     def find_level(self, N, train=True):
         level = np.arange(4) + 1
-        level = np.tile(level, self.NUM_DATA//4)
+        level = np.tile(level, self.DATA_SIZE[0]//4)
         train_indices, test_indices = self.find_indices()
         if train:
             level_of_train = level[train_indices]
@@ -203,9 +216,17 @@ class GetData():
         else:
             level_of_test = level[test_indices]
             return level_of_test[N], test_indices[N]
+        
+    def info(self):
+        saved_var = {
+            'factor':self.factor,
+            'num_training':self.num_training,
+            'seed':self.seed
+            }
+        return saved_var
             
     def __shuffle_data(self):
-        self.indices = np.arange(self.NUM_DATA)
+        self.indices = np.arange(self.DATA_SIZE[0])
         rng = np.random.default_rng(self.seed)
         rng.shuffle(self.indices) # suffle order
 
@@ -236,7 +257,7 @@ class GetData():
         if flag:
             ideal_psf = data[::4]          
             data = np.repeat(ideal_psf, 4, axis=0)
-            assert data.shape[0] == self.NUM_DATA
+            assert data.shape[0] == self.DATA_SIZE[0]
             assert (data[0] == data[3]).all()
             dtype = 'ideal_psf'
         train_indices, test_indices = self.find_indices()
@@ -255,13 +276,14 @@ class GetData():
         return np.load(os.path.join(self.DIRETORY, name + '.npy'))
     
     def __load_file(self, path):
-        return np.load(path)[:, DATA_SIZE[1]%2:, DATA_SIZE[2]%2:, :]
+        return np.load(path)[:, self.DATA_SIZE[1]%2:, self.DATA_SIZE[2]%2:, :]
     
     def __output_shape(self):
         output_shape = (self.num_training,) + \
-            ((DATA_SIZE[1]-DATA_SIZE[1]%2)//self.factor,) + \
-                (DATA_SIZE[1]-DATA_SIZE[1]%2,)
+            ((self.DATA_SIZE[1]-self.DATA_SIZE[1]%2)//self.factor,) + \
+                (self.DATA_SIZE[1]-self.DATA_SIZE[1]%2,)
         if self.complex_network:
             return output_shape + (2,)
         else:
             return output_shape + (1,)
+        

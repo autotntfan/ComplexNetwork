@@ -14,7 +14,6 @@ import tensorflow.keras.backend as K
 
 
 
-
 class AmplitudeMaxout(Layer):
     
     def __init__(self, num_pieces=4, name='AMU',**kwargs):
@@ -57,7 +56,7 @@ class AmplitudeMaxout(Layer):
         return tuple(shape)
     
     def get_config(self):
-        base_config = super().get_config()
+        base_config = super(AmplitudeMaxout, self).get_config()
         config = {'units': self.num_units,
                   'pieces': self.num_pieces}
         return dict(list(base_config.items()) + list(config.items()))
@@ -119,6 +118,64 @@ class zReLU(Layer):
     
     def compute_output_shape(self, input_shape):
         return input_shape
+
+class FLeakyReLU(Layer):
+    def __init__(self, alpha=0.01, **kwargs):
+        super().__init__(**kwargs)
+        self.alpha = alpha
+    
+
+    def build(self, input_shape):
+        param_shape = list(input_shape[1:])
+        self.threshold = self.add_weight(shape=param_shape,
+                                          name='threshold',
+                                          initializer='zeros')
+        self.built = True
+        
+    def call(self, inputs):
+        # values larger than positive threshold
+        positive = tf.nn.relu(inputs - tf.abs(self.threshold))
+        '''
+        values less than positive threshold:
+            since relu only eliminate values less than zeros, minus sign
+            is added to ensure desired value over zero and then recover 
+            to the original value
+        '''
+        negative = self.alpha * -tf.nn.relu(-inputs - tf.abs(self.threshold))
+        # finally, combine the two region
+        return positive + negative
+
+    def get_config(self):
+        # any declared variable inside __init__ is required to be in config
+        base_config = super().get_config()
+        config = {'alpha': self.alpha}
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+# class FLeakyReLU(Layer):
+#     def __init__(self, threshold=1e-2, alpha=0.01, **kwargs):
+#         super().__init__(**kwargs)
+#         self.threshold = threshold
+#         self.alpha = alpha
+        
+#     def call(self, inputs):
+#         less_than_threshold = tf.multiply(
+#             tf.cast(tf.math.less_equal(inputs, -self.threshold),
+#                               dtype=tf.float32),self.alpha)
+#         greater_than_threshold = tf.cast(tf.math.greater_equal(inputs, self.threshold),  dtype=tf.float32)
+#         return tf.multiply(tf.add(less_than_threshold,greater_than_threshold),inputs)
+    
+ 
+#     def get_config(self):
+#         base_config = super().get_config()
+#         config = {'threshold': self.threshold,
+#                   'alpha': self.alpha}
+#         return dict(list(base_config.items()) + list(config.items()))
+
+#     def compute_output_shape(self, input_shape):
+#         return input_shape
+
 '''
 ValueError: including someone isn't differentiable, especially
  
@@ -210,13 +267,10 @@ class modReLU(Layer):
         outputs = complexnn.activation.cReLU()(inputs)
         
 '''
-get_custom_objects().update({'zReLU': zReLU()})
-get_custom_objects().update({'cReLU': cReLU()})
-get_custom_objects().update({'cLeakyReLU': cLeakyReLU()})
-get_custom_objects().update({'ctanh': ctanh()})
-get_custom_objects().update({'modReLU': modReLU()})
-
-        
-    
-    
+get_custom_objects().update({'zReLU': zReLU(),
+                             'cReLU': cReLU(),
+                             'cLeakyReLU': cLeakyReLU(),
+                             'ctanh': ctanh(),
+                             'modReLU': modReLU(),
+                             'FLeakyReLU': FLeakyReLU()})
 
