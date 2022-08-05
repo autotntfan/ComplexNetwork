@@ -106,9 +106,9 @@ x_ref = (-(Nelements-1)/2:(Nelements-1)/2)*pitch;
 
 z = dz_orig/Upsample*(Upsample*Noffset + (0:Upsample*Nsample-1)');
 k = 1;
-
-for k = 1:4
-    delay_dataset = zeros(Nsample, Nelements, Nelements);
+% 
+% for k = 1:4
+    delay_channel_data = zeros(Nsample, Nelements, Nelements);
     delay_curve_in_sample = round(delay_curve_in_time * T_sample/4 * delay_max(k)); % convert [0,1/4]*lambda to # of samples
     % this loop spends about 1.68s
     for itx = 1:Nelements 
@@ -116,34 +116,33 @@ for k = 1:4
         % transmitting element and all received Nelements.
         % delay_curve1(itx): tx delay for only one tx element
         % delay_curve1: rx delay for all Nelements
-        delay_dataset(:, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
+        delay_channel_data(:, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
     end
     % ------ calculate delay ------
     tic
-    % delay size = [Nsample, rx Nelement, tx aline]
+    % delay_set size = [Nsample, beamspace*tx Nelement]
     % time delay for each Aline to different depth, it can be viewed as the
-    % transmitted delay, i.e. only one element has signal in one time
-    delay_tx = abs(repmat(x_bf,[Nsample,1])+1j*repmat(z,[1,beamspace*Nelements]));
-    % received signal is from all elements, each elements has "beamspace"
-    % beam, while the second dim is beamspace due to the x_bf order
-    delay_rx = reshape(delay_tx, [Nsample,beamspace,Nelements]);
-    % all perspectives are from the i-th aline (beam), total
-    % beamspace*Nelements alines.
-    % delay_time = delay_rx + delay_tx;
-    delay_time = zeros(size(delay_dataset));
-    % delay_rx: one rx signal is from Nelements, i.e. one received beam has
-    % Nelements signal. one element is divided into "beamspace" beam, each
-    % "beamsapce" tx beam has the same associated received i-th beam in one
-    % element, e.g. the 1-st, 5-th, 9-th ... tx beam's delay_tx are the
-    % 1-st received beam by Nelements. the 2-nd, 6-th, 10-th ... ones are
-    % 2-nd received beam. Hence delay_tx are repeated by Nelements. 
-    % delay_rx = repmat(delay_rx, [1,Nelements,1]);
-    % delay_tx: since one rx has Nelements signal, tx is required to has
-    % the same length to one-by-one add to get the final delay_time
-    % delay_tx = repmat(delay_tx,[1,1,Nelements]);
-    delay_time = repmat(delay_rx, [1,Nelements,1]) + repmat(delay_tx,[1,1,Nelements]); % [Nsample,Nelements*beamspace,Nelements]
-    clear delay_rx delay_tx
-    delay_time = permute(delay_time,[1 3 2]);
+    % pure transmitted and received delay
+    delay_set = abs(repmat(x_bf,[Nsample,1])+1j*repmat(z,[1,beamspace*Nelements]));
+
+    % delay_tmp size = [Nsample, each element has "beamspace" beam, rx element], only the reason is
+    % convenient to do further and the second dim is beamspace due to the x_bf order.
+    delay_tmp = reshape(delay_set, [Nsample,beamspace,Nelements]);
+    % delay_time = delay_tx + delay_rx;
+    % IF WE CHECK BEANSPACE 1.2.3.4, EACH HAS [Nsample, rx Nelements]
+    % delay_rx: for the i-th beamspace
+    % the "rx Nelements" means received elements which have the common (only one) transmitted element, so
+    % it repeats "Nelements" tx to calcuate the delay_rx.
+    % delay_tx = repmat(delay_set,[1,1,Nelements]);
+
+    % delay_rx: for the i-th beamspace, the different transmitted elements
+    % have the common received elements. It means that the rx elements need
+    % to be copy by "Nelements (tx)" times along beamspace (second dim) direction.
+    % delay_rx = repmat(delay_tmp,[1,Nelements,1]);
+
+    delay_time = repmat(delay_set,[1,1,Nelements]) + repmat(delay_tmp, [1,Nelements,1]); % [Nsample,rx Nelements*beamspace,tx Nelements]
+    clear delay_tmp delay_set
+    delay_time = permute(delay_time,[1 3 2]); % [Nsample,tx Nelements,rx Nelements*beamspace]
 
     x_element = reshape(repmat(x_ref',[1, beamspace*Nelements]),1,Nelements,[]); % i-th element x location
     x_beam = reshape(repmat(x_bf,[Nelements,1]),1,Nelements,[]); % i-th beam (aline) x location 
@@ -156,42 +155,59 @@ for k = 1:4
     end
     toc
 
-    % ------ time to index ------
     delay_idx = round(Upsample*delay_time/soundv*fs - Upsample*Noffset); % convert delay time to i-th sample
-    % delay_idx size = (?,128,512)
     delay_idx(delay_idx > Upsample*Nsample) = Upsample*Nsample + 1; % all the i-th sample over Nsample belongs to the Nsample+1-th sample
-    % delay_idx size = (?,128,512)
-    delay_idx = delay_idx + repmat([0:Upsample*Nsample+1:(Upsample*Nsample+1)*(Nelements-1)], [Upsample*Nsample,1, beamspace*Nelements]);
-    % size = [Nsample, 1.5*Nelements, Nelements], may mean that other
-    % virtual elements exist to do "draw circle" well. i.e. append zeros
-    delay_dataset = [zeros(Nsample, Nelements*0.25, Nelements) delay_dataset zeros(Nsample, Nelements*0.25, Nelements)]; 
+    delay_idx = delay_idx + repmat([0:Upsample*Nsample+1:(Upsample*Nsample+1)*(Nelements-1)], [Upsample*Nsample,1, beamspace*Nelements]); % convert to array index
+    append_elements = 0.25*Nelements;
+    append_chan = Nelements + 2*append_elements;
     half_chan = Nelements/2; % 64
-    chan_data = zeros(Upsample*Nsample, Nelements, 1.5*beamspace*Nelements); % (?, 128, 192*4)
+    
+
+    delay_channel_data = [zeros(Nsample, append_elements, Nelements) delay_channel_data zeros(Nsample, append_elements, Nelements)]; 
+    RF_data = zeros(Upsample*Nsample, Nelements, 1.5*beamspace*Nelements); % (?, 128, 192*4)
+
     for itx = 1:Nelements % 1 to 128
         tmp = zeros(Upsample*Nsample+1, 1.5*Nelements);
-        tmp(1:end-1,:) = delay_dataset(:,:,itx); % size = (?*Upsample+1, 1.5*Nelement)
-        for Nlines = 1:beamspace*NChan % 1 to 4*192
-            % itx + 0.25*Nelements: adjust to the new index of element
-            % ceil(Nlines/beamspace): the i-th element
-            if abs((itx+0.25*Nelements)-ceil(Nlines/beamspace)) < half_chan % tx + 128/4 - 1/4 < 64 => tx < 33 
-                if ceil(Nlines/beamspace) - half_chan < 1 % left one-third elements
-                    chan_data(:, half_chan-ceil(Nlines/beamspace)+2:end, Nlines) = chan_data(:, half_chan-ceil(Nlines/beamspace)+2:end, Nlines) +...
-                        f_num_mask_tx(:, half_chan-ceil(Nlines/beamspace)+2:end, beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1)...
-                        .*tmp(delay_idx(:, half_chan-ceil(Nlines/beamspace)+2:end, beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1) + ((ceil(Nlines/beamspace)-half_chan))*(Upsample*Nsample+1));
-                elseif ceil(Nlines/beamspace) > (NChan - half_chan) % right one-third elements
-                    chan_data(:, 1:half_chan+(NChan-ceil(Nlines/beamspace)), Nlines) = chan_data(:, 1:half_chan+(NChan-ceil(Nlines/beamspace)), Nlines) +...
-                        f_num_mask_tx(:, 1:half_chan+(NChan-ceil(Nlines/beamspace)), beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1)...
-                        .*tmp(delay_idx(:, 1:half_chan+(NChan-ceil(Nlines/beamspace)), beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1) + ((ceil(Nlines/beamspace)-half_chan))*(Upsample*Nsample+1));
-                else  % middle one-third elements
-                    chan_data(:, :, Nlines) = chan_data(:, :, Nlines) + ...
-                        f_num_mask_tx(:, :, beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1) ...
-                        .*tmp(delay_idx(:, :, beamspace*(itx+0.25*Nelements)-(Nlines-beamspace*half_chan)+1) + ((ceil(Nlines/beamspace)-half_chan))*(Upsample*Nsample+1));
+        tmp(1:end-1,:) = delay_channel_data(:,:,itx); % size = (?*Upsample+1, 1.5*Nelement)
+        for irx = 1:beamspace*append_chan % 1 to 4*192
+            
+            if abs((itx+0.25*Nelements)-ceil(irx/beamspace)) < half_chan % the itx-th transmitted element being the center selects the left and right half channel elements as the received elements
+                if ceil(irx/beamspace) < half_chan + 1 % left one-third elements -> half_chan - ceil(Nlines/beamspace) + 1 > 0
+                    RF_data(:, half_chan-ceil(irx/beamspace)+2:end, irx) = RF_data(:, half_chan-ceil(irx/beamspace)+2:end, irx) +...
+                        f_num_mask_tx(:, half_chan-ceil(irx/beamspace)+2:end, beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1)...
+                        .*tmp(delay_idx(:, half_chan-ceil(irx/beamspace)+2:end, beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1) + ((ceil(irx/beamspace)-half_chan))*(Upsample*Nsample+1));
+                elseif ceil(irx/beamspace) > (append_chan - half_chan) % right one-third elements
+                    RF_data(:, 1:half_chan+(append_chan-ceil(irx/beamspace)), irx) = RF_data(:, 1:half_chan+(append_chan-ceil(irx/beamspace)), irx) +...
+                        f_num_mask_tx(:, 1:half_chan+(append_chan-ceil(irx/beamspace)), beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1)...
+                        .*tmp(delay_idx(:, 1:half_chan+(append_chan-ceil(irx/beamspace)), beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1) + ((ceil(irx/beamspace)-half_chan))*(Upsample*Nsample+1));
+                else  
+                    % middle one-third elements, Nlines > beamspace*half_chan
+                    % tmp(delay(...)): size = [Nsample,Nelement]
+                    RF_data(:, :, irx) = RF_data(:, :, irx) + ...
+                        f_num_mask_tx(:, :, beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1) ...
+                        .*tmp(delay_idx(:, :, beamspace*(itx+0.25*Nelements)-(irx-beamspace*half_chan)+1) + ((ceil(irx/beamspace)-half_chan))*(Upsample*Nsample+1));
                 end
             end
         end
+    end
 
-    end    
-
-end
-
+    f_num_mask_rx = double(abs(repmat(z,[1, Nelements])./repmat(x_ref, [Upsample*Nsample, 1])/2) > f_num);
+    f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx, 2);
+    
+    rf_data = zeros(Upsample*Nsample, beamspace*append_chan);
+    for idx = 1:beamspace*append_chan
+        rf_data(:, idx) = sum(f_num_mask_rx.*RF_data(:, :, idx), 2);
+    end
+    rf_data = rf_data(1:Upsample:end, :);
+    % end
+    lpf = fir1(48, 0.8*bw*fc/(fs/2)).';
+    bb_data = conv2(rf_data.*exp(-1i*2*pi*fc*(0:size(rf_data, 1)-1)'/fs), lpf, 'same');
+    % -------- PSF Preprocessing ---------
+    envelope = abs(bb_data);
+    envelope_dB = 20*log10(envelope/max(envelope, [], 'all'));
+    DR = 60;
+    figure;
+    image((-(size(bb_data,2)-1)/2:(size(bb_data,2)-1)/2)*pitch/beamspace*1e3, (Noffset+(0:Nsample-1))*dz_orig*1e3, envelope_dB+DR);
+    colormap(parula(DR));colormap;colorbar;
+    axis image;
 
