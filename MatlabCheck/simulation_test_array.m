@@ -96,17 +96,38 @@ tic
 % 1/beamspace*(beamspace-1)/2 and the last right Aline is at
 % Nelement/2 - 1/beamspace*(beamspace-1)/2
 x_range = (Nelements-1)/2 + 1/beamspace*(beamspace-1)/2; 
-
 x_bf = (-x_range:1/beamspace:x_range)*pitch;
 % element coordinate without considering interpolation, i.e. beamspace = 1
 x_ref = (-(Nelements-1)/2:(Nelements-1)/2)*pitch;
 
+
 z = dz_orig/Upsample*(Upsample*Noffset + (0:Upsample*Nsample-1)');
+
+    
+x_element = reshape(repelem(x_ref',beamspace*Nelements), 1, beamspace*Nelements, Nelements);
+x_beam = reshape(repelem(x_bf,Nelements),1, beamspace*Nelements, Nelements); % i-th beam (aline) x location 
+
+f_num_mask_rx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./repmat(x_beam - x_element,[Nsample,1,1]))/2 > f_num); % f# = d/D
+% f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx,2);
+
+f_num_mask_tx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./repmat(x_element,[Nsample,1,1]))/2 > f_num);
+% f_num_mask_tx = f_num_mask_tx./sum(f_num_mask_tx,3);
+
 delay_set = abs(repmat(x_bf,[Nsample,1]) + 1j*repmat(z,[1,beamspace*Nelements]));
+delay_tmp = reshape(delay_set, [Nsample,beamspace,Nelements]);
+delay_time = repmat(delay_set,[1,1,Nelements]) + repmat(delay_tmp, [1,Nelements,1]); % [Nsample,rx Nelements*beamspace,tx Nelements]
+clear delay_tmp delay_set
+delay_idx = ceil(Upsample*delay_time/soundv*fs - Upsample*Noffset); % convert delay time to i-th sample
+clear delay_time
+delay_idx(delay_idx > Upsample*Nsample) = Upsample*Nsample + 1; % all the i-th sample over Nsample belongs to the Nsample+1-th sample
+
+
 k = 1;
+FOV = 1.5*beamspace*Nelements;
+
 % 
 % for k = 1:4
-    delay_channel_data = zeros(Nsample+1,1.5*Nelements,Nelements);
+    delay_channel_data = zeros(Nsample+1,Nelements,Nelements);
     delay_curve_in_sample = round(delay_curve_in_time * T_sample/4 * delay_max(k)); % convert [0,1/4]*lambda to # of samples
     % this loop spends about 1.68s
     for itx = 1:Nelements 
@@ -114,70 +135,35 @@ k = 1;
         % transmitting element and all received Nelements.
         % delay_curve1(itx): tx delay for only one tx element
         % delay_curve1: rx delay for all Nelements
-        delay_channel_data(1:end-1, 0.25*Nelements+1:end-0.25*Nelements, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
+        delay_channel_data(1:end-1, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
     end
-    % ------ calculate delay ------
-
-    % delay_set size = [Nsample, beamspace*tx Nelement]
-    % time delay for each Aline to different depth, it can be viewed as the
-    % pure transmitted and received delay
-    FOV = 1.5*beamspace*Nelements;
-    RFdata = zeros(Nsample, FOV); % field of views, x: -0.75*Nelement to 0.75*Nelement;
-
     
-    for Nline = 1:FOV
 
+    RFdata = zeros(Nsample, FOV); % field of views, x: -0.75*Nelement to 0.75*Nelement;
+    for Nline = 1:FOV
+        
         ibeam = mod(Nline,beamspace);
         if ibeam == 0
             ibeam = beamspace;
         end
 
-        TXstart = max(1, Nelements*3/4 + 2 - ceil(Nline/beamspace));
-        TXend = min(Nelements,Nelements + 1 - ceil((Nline - FOV/2)/beamspace));
+        iElement = max(1, Nelements*3/4 + 2 - ceil(Nline/beamspace)):min(Nelements,Nelements + 1 - ceil((Nline - FOV/2)/beamspace));
+        ibeam = beamspace*(iElement) + 1 - ibeam;
 
-        RXstart = max(1, Nelements/2 + 2 - ceil(Nline/beamspace));
-        RXend = min(Nelements, Nelements/2 + 1 - ceil((Nline - FOV)/beamspace));
-%         RXend = min(Nelements, Nelements/2 - ceil((Nline - FOV)/beamspace));
+        channelElement = max(1, ceil((Nline-FOV/2)/beamspace)) + (iElement - iElement(1));
+  
+        channel_ind = delay_idx(:,ibeam,iElement) + ...
+                      repmat((channelElement-1)*(Nsample+1), [Nsample,1,length(iElement)]) + ... % 2-nd dim index
+                      reshape(repelem(prod(size(delay_channel_data,1,2))*(channelElement-1), ...
+                                      Nsample*length(ibeam)), ...
+                              [Nsample,length(ibeam),length(channelElement)]); % 3-rd dim index
 
+        RFdata(:,Nline) = sum(f_num_mask_rx(:,ibeam,iElement).* ...
+                              f_num_mask_tx(:,ibeam,iElement).* ...
+                              delay_channel_data(channel_ind), ...
+                              [2,3]);
 
-        TXbeam = beamspace*(TXstart:TXend) + 1 - ibeam;
-        RXbeam = beamspace*(RXstart:RXend) + 1 - ibeam;
-        realTXelement = max(1, ceil((Nline-FOV/2)/beamspace)) + ...
-                        ((TXstart:TXend) - TXstart);
-        realRXelement = max(1, ceil(Nline/beamspace)-Nelements/2):min(size(delay_channel_data,2), Nelements/2+ceil(Nline/beamspace)-1);
-%         realRXelement = 1+max(1, ceil(Nline/beamspace)-Nelements/2):min(size(delay_channel_data,2), Nelements/2+ceil(Nline/beamspace));
-
- 
-
-        f_num_D = 2*(reshape(repmat(x_bf(RXbeam)', [1, length(TXbeam)]), [1,  length(RXbeam), length(TXbeam)]) - ...
-                     reshape(repelem(x_ref(TXstart:TXend), length(RXbeam)), [1, length(RXbeam), length(TXbeam)])); % size = (1, len(RXbeam), len(TXbeam))
-        f_num_mask_rx = double(abs(repmat(z,[1, length(RXbeam), length(TXbeam)])./f_num_D) > f_num);
-
-%         f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx,2); % size = (Nsample, len(RXbeam), len(TXbeam))
-%         f_num_mask_rx(isnan(f_num_mask_rx)) = 0;
-        
-        f_num_mask_tx = double(abs(repmat(z,[1, length(TXbeam)])./repmat(x_ref(TXstart:TXend), [Nsample, 1])/2) > f_num); % size = (Nsample, len(TX))
-%         f_num_mask_tx = repmat(reshape(f_num_mask_tx./sum(f_num_mask_tx, 2), [Nsample,1,length(TXbeam)]), [1, length(RXbeam), 1]); % size = (Nsample, len(RX),len(TX))
-%         f_num_mask_tx(isnan(f_num_mask_tx)) = 0;
-
-        f_num_mask_tx = repmat(reshape(f_num_mask_tx, [Nsample,1,length(TXbeam)]), [1, length(RXbeam), 1]); % size = (Nsample, len(RX),len(TX))
-
-
-        delay = reshape(repelem(delay_set(:,TXbeam), 1,length(RXbeam)), [Nsample, length(RXbeam), length(TXbeam)]) + ...
-                repmat(delay_set(:,RXbeam), [1, 1, length(TXbeam)]); % size = [Nsample, len(RXbeam), len(TXbeam)]
-        delay = ceil(delay/soundv*fs - Noffset);
-        delay(delay>Nsample) = Nsample + 1;
-
- 
-        delay = delay + ...
-                repmat((realRXelement-1)*(Nsample+1), [Nsample,1,length(TXbeam)]) + ... % 2D index
-                reshape(repelem(prod(size(delay_channel_data,1,2))*(realTXelement-1), Nsample*length(realRXelement)), [Nsample,length(RXbeam),length(TXbeam)]); % 3D index
-
-
-        RFdata(:,Nline) = sum(f_num_mask_rx.*delay_channel_data(delay).*f_num_mask_tx,[2,3]);
     end
-
-   
 
 
     lpf = fir1(48, 0.8*bw*fc/(fs/2)).';
@@ -187,11 +173,8 @@ k = 1;
     envelope_dB = 20*log10(envelope/max(envelope, [], 'all'));
     DR = 60;
     figure;
-    image((-size(bb_data,2)/2:(size(bb_data,2)-1)/2)*pitch/beamspace*1e3, (Noffset+(0:Nsample-1))*dz_orig*1e3, envelope_dB+DR);
+    image((-(size(bb_data,2)-1)/2:(size(bb_data,2)-1)/2)*pitch/beamspace*1e3, (Noffset+(0:Nsample-1))*dz_orig*1e3, envelope_dB+DR);
     colormap(parula(DR));colormap;colorbar;
     axis image;
-    title('test - without normalization')
-    toc
 
-
-
+toc
