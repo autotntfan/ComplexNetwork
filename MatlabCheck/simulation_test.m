@@ -100,8 +100,12 @@ x_range = (Nelements-1)/2 + 1/beamspace*(beamspace-1)/2;
 x_bf = (-x_range:1/beamspace:x_range)*pitch;
 % element coordinate without considering interpolation, i.e. beamspace = 1
 x_ref = (-(Nelements-1)/2:(Nelements-1)/2)*pitch;
-
 z = dz_orig/Upsample*(Upsample*Noffset + (0:Upsample*Nsample-1)');
+
+aperturesize = reshape(2*repmat(x_ref, [beamspace*Nelements,1]) - repmat(x_bf', [1,Nelements]), [1, beamspace*Nelements, Nelements]);
+f_num_mask = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./aperturesize) > f_num);
+
+
 delay_set = abs(repmat(x_bf,[Nsample,1]) + 1j*repmat(z,[1,beamspace*Nelements]));
 k = 1;
 % 
@@ -149,18 +153,18 @@ k = 1;
 
  
 
-        f_num_D = 2*(reshape(repmat(x_bf(RXbeam)', [1, length(TXbeam)]), [1,  length(RXbeam), length(TXbeam)]) - ...
-                     reshape(repelem(x_ref(TXstart:TXend), length(RXbeam)), [1, length(RXbeam), length(TXbeam)])); % size = (1, len(RXbeam), len(TXbeam))
-        f_num_mask_rx = double(abs(repmat(z,[1, length(RXbeam), length(TXbeam)])./f_num_D) > f_num);
+%         f_num_D = 2*(reshape(repmat(x_bf(RXbeam)', [1, length(TXbeam)]), [1,  length(RXbeam), length(TXbeam)]) - ...
+%                      reshape(repelem(x_ref(TXstart:TXend), length(RXbeam)), [1, length(RXbeam), length(TXbeam)])); % size = (1, len(RXbeam), len(TXbeam))
+%         f_num_mask_rx = double(abs(repmat(z,[1, length(RXbeam), length(TXbeam)])./f_num_D) > f_num);
 
 %         f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx,2); % size = (Nsample, len(RXbeam), len(TXbeam))
 %         f_num_mask_rx(isnan(f_num_mask_rx)) = 0;
         
-        f_num_mask_tx = double(abs(repmat(z,[1, length(TXbeam)])./repmat(x_ref(TXstart:TXend), [Nsample, 1])/2) > f_num); % size = (Nsample, len(TX))
+%         f_num_mask_tx = double(abs(repmat(z,[1, length(TXbeam)])./repmat(x_ref(TXstart:TXend), [Nsample, 1])/2) > f_num); % size = (Nsample, len(TX))
 %         f_num_mask_tx = repmat(reshape(f_num_mask_tx./sum(f_num_mask_tx, 2), [Nsample,1,length(TXbeam)]), [1, length(RXbeam), 1]); % size = (Nsample, len(RX),len(TX))
 %         f_num_mask_tx(isnan(f_num_mask_tx)) = 0;
 
-        f_num_mask_tx = repmat(reshape(f_num_mask_tx, [Nsample,1,length(TXbeam)]), [1, length(RXbeam), 1]); % size = (Nsample, len(RX),len(TX))
+%         f_num_mask_tx = repmat(reshape(f_num_mask_tx, [Nsample,1,length(TXbeam)]), [1, length(RXbeam), 1]); % size = (Nsample, len(RX),len(TX))
 
 
         delay = reshape(repelem(delay_set(:,TXbeam), 1,length(RXbeam)), [Nsample, length(RXbeam), length(TXbeam)]) + ...
@@ -173,8 +177,11 @@ k = 1;
                 repmat((realRXelement-1)*(Nsample+1), [Nsample,1,length(TXbeam)]) + ... % 2D index
                 reshape(repelem(prod(size(delay_channel_data,1,2))*(realTXelement-1), Nsample*length(realRXelement)), [Nsample,length(RXbeam),length(TXbeam)]); % 3D index
 
-
-        RFdata(:,Nline) = sum(f_num_mask_rx.*delay_channel_data(delay).*f_num_mask_tx,[2,3]);
+        f_num_mask_tx = repmat(f_num_mask(:,beamspace*Nelements/2 + 1 - ibeam,TXstart:TXend), [1, length(RXbeam), 1]);
+        f_num_mask_rx = repmat(squeeze(f_num_mask(:,beamspace*Nelements/2 + 1 - ibeam, RXstart:RXend)), [1,1,length(TXbeam)]);
+        RFdata(:,Nline) = sum(f_num_mask_tx.* ... % tx mask
+                              f_num_mask_rx.* ... % rx mask
+                              delay_channel_data(delay),[2,3]);
     end
 
    

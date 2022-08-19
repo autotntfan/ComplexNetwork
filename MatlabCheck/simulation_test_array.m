@@ -104,14 +104,18 @@ x_ref = (-(Nelements-1)/2:(Nelements-1)/2)*pitch;
 z = dz_orig/Upsample*(Upsample*Noffset + (0:Upsample*Nsample-1)');
 
     
-x_element = reshape(repelem(x_ref',beamspace*Nelements), 1, beamspace*Nelements, Nelements);
-x_beam = reshape(repelem(x_bf,Nelements),1, beamspace*Nelements, Nelements); % i-th beam (aline) x location 
 
-f_num_mask_rx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./repmat(x_beam - x_element,[Nsample,1,1]))/2 > f_num); % f# = d/D
-% f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx,2);
 
-f_num_mask_tx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./repmat(x_element,[Nsample,1,1]))/2 > f_num);
-% f_num_mask_tx = f_num_mask_tx./sum(f_num_mask_tx,3);
+
+x_beam = repmat(reshape(x_bf, [1,beamspace*Nelements,1]), [Nsample, 1, Nelements]);
+x_element = repmat(reshape(x_ref, [1,1,Nelements]), [Nsample, beamspace*Nelements, 1]);
+
+aperturesize_tx = 2*(x_beam - x_element);
+f_num_mask_tx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./aperturesize_tx) > f_num); % f# = d/D
+% f_num_mask_tx = f_num_mask_tx./sum(f_num_mask_tx,2);
+
+% f_num_mask_rx = double(abs(repmat(z,[1,beamspace*Nelements,Nelements])./repmat(x_element,[Nsample,1,1]))/2 > f_num);
+% f_num_mask_rx = f_num_mask_rx./sum(f_num_mask_rx,3);
 
 delay_set = abs(repmat(x_bf,[Nsample,1]) + 1j*repmat(z,[1,beamspace*Nelements]));
 delay_tmp = reshape(delay_set, [Nsample,beamspace,Nelements]);
@@ -158,7 +162,7 @@ FOV = 1.5*beamspace*Nelements;
                                       Nsample*length(ibeam)), ...
                               [Nsample,length(ibeam),length(channelElement)]); % 3-rd dim index
 
-        RFdata(:,Nline) = sum(f_num_mask_rx(:,ibeam,iElement).* ...
+        RFdata(:,Nline) = sum(f_num_mask_tx(:,ibeam,iElement).* ...
                               f_num_mask_tx(:,ibeam,iElement).* ...
                               delay_channel_data(channel_ind), ...
                               [2,3]);
@@ -174,7 +178,7 @@ FOV = 1.5*beamspace*Nelements;
     DR = 60;
     figure;
     image((-(size(bb_data,2)-1)/2:(size(bb_data,2)-1)/2)*pitch/beamspace*1e3, (Noffset+(0:Nsample-1))*dz_orig*1e3, envelope_dB+DR);
-    colormap(parula(DR));colormap;colorbar;
+    colormap(gray(DR));colormap;colorbar;
     axis image;
 
 toc

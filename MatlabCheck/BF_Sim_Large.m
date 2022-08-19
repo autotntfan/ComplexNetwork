@@ -191,7 +191,7 @@ x_ref = [-(Chan-1)/2:(Chan-1)/2]*pitch;
 
 
 %%
-k = 1;
+k = 4;
 %% Apply Delay
 delay_max = [0, 1, 1.5, 2];
 % for k = 1:4
@@ -221,7 +221,7 @@ delay_max = [0, 1, 1.5, 2];
                 abs(repmat(x_ibf(ibf, :), [Upsample*Nsample, 1]) + 1i*dz_orig/Upsample*repmat(Upsample*Noffset+[0:Upsample*Nsample-1].', [1, Chan])) +...    % rx
                 abs(repmat(x_ibf(ibf, delay_tx), [Upsample*Nsample, Chan]) + 1i*dz_orig/Upsample*repmat(Upsample*Noffset+[0:Upsample*Nsample-1].', [1, Chan]));   % tx        
             pos1_tx = repmat(x_ref-x_ibf(ibf, delay_tx), [Upsample*Nsample, 1]) + 1i*dz_orig/Upsample*repmat(Upsample*Noffset+[0:Upsample*Nsample-1].', [1, Chan]);
-            f_num_mask_tx(:, :, beamspace*(delay_tx-1)+ibf) = abs(imag(pos1_tx)./real(pos1_tx))/2 > f_num;
+            f_num_mask_tx(:, :, beamspace*(delay_tx-1)+ibf) = abs(imag(pos1_tx)./real(pos1_tx))/2 > f_num; % 某條beam看過去的aperture size
             f_num_mask_tx(:, :, beamspace*(delay_tx-1)+ibf) = f_num_mask_tx(:, :, beamspace*(delay_tx-1)+ibf)./sum(f_num_mask_tx(:, :, beamspace*(delay_tx-1)+ibf), 2);
 
         end

@@ -73,7 +73,7 @@
 % excitation = excitation.*hanning(length(excitation))';
 % xdc_excitation(Th, excitation); 
 % % point sources location
-% positions = [0 0 1;0 0 7;0 0 14;0 0 21;0 0 28;0 0 60]/1000;
+% positions = [ 0 0 1;0 0 7;0 0 14;0 0 21;0 0 28;0 0 60]/1000;
 % % original depth + random depth : [1, 10]/1e3 + [3.3,8.2]/1e3 + 2/1e3
 % positions(2:end-1, 3) = positions(2:end-1, 3) + (rand(1)*10)*1e-3 + (Kz_range)*soundv/fc + 2e-3; 
 % amp = ones(size(positions, 1), 1);
