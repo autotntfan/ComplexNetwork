@@ -19,9 +19,9 @@ end
 % bw = 0.68;
 
 soundv = 1540;       % [m/s]
-lambda = soundv/f0;  % = [205.3,513.3] [um]
+lambda = soundv/f0;  % = [205.3,513.3] um
 height = 5e-3;       % = 5 mm
-pitch = 3e-4;        % = 0.3 mm
+pitch = 3e-4;        % = 300 um
 % kerf = 0.01e-4;
 kerf = 0;
 Nelements = 128;

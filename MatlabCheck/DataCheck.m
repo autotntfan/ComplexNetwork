@@ -5,7 +5,7 @@ global DR
 DR = 60;
 
 % loading data
-load('D:/ComplexNetwork/simulation_data/Data_30_delay_2.mat')
+load('D:/ComplexNetwork/simulation_data/Data_295_delay_4.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_185_delay_1.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_396_delay_2.mat')
 % load('D:/ComplexDataset/simulation_straight/Data_322_delay_1.mat')
@@ -155,7 +155,7 @@ function showimg(xaxis, zaxis, img)
     ylabel('Depth (mm)', 'FontSize', 12)
     xticks('auto')
     yticks('auto')
-    axis image
+    axis square
 end
 
 function showfft(img, fs)
