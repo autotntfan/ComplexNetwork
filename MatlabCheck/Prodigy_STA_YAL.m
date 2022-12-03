@@ -1,7 +1,7 @@
 clear
 close all
 
-
+tic
 str = './IdealPSF/IdealPSF_full_Frame';
 load([str, '1_EG1.mat'], 'EG_para', 'Overall_para', 'Event_para_hdr');
 
@@ -13,11 +13,12 @@ fs = upsampling*Overall_para.fs*1e6;
 soundv = Overall_para.soundv;
 dz0 = soundv/fs/2;
 f_num = 2;
-FOV   = 1*Nelements; % field of view, the x-direction size of beamformed RF data.
+FOV   = 1.5*Nelements; % field of view, the x-direction size of beamformed RF data.
 iter = Overall_para.Frames;
-Noffset = Event_para_hdr.Toffset;
-Noffset = upsampling*round(Noffset*fs);
+% Noffset = Event_para_hdr.Toffset;
+% Noffset = round(Noffset*fs);
 N_dep_min = EG_para.MinDepth_sample;
+Noffset = N_dep_min;
 N_dep = EG_para.MaxDepth_sample;
 lambda_in_sample = fs/f0;   
 Nsample = N_dep-N_dep_min+1;
@@ -112,7 +113,7 @@ k = 1;
         % squeeze(delay(:,Nline,:)): rx delay, (delay at different depth, delay btw all aline and i-th element, copy the same delay for each tx element)
         channel_ind = ceil(Nlinedistance/soundv*fs - Noffset); % convert delay in time to in sample
         channel_ind(channel_ind > Nsample) = Nsample + 1; % limit delay index
-        channel_ind(channel_ind < 1) = 1; % limit delay index
+        channel_ind(channel_ind < 1) = Nsample + 1; % limit delay index
         channel_ind = channel_ind + index3D; % convert the array index to general index
         % sum the channel data from the K tx elements and K rx elements,where K is related to the f # mask.
         % dimension means (Nsample, channel data from rx element, channel data from tx element)
@@ -122,9 +123,9 @@ k = 1;
     BBdata = conv2(RFdata.*exp(-1j*2*pi*f0*(0:size(RFdata, 1)-1)'/fs), lpf, 'same');
     % -------- PSF Preprocessing ---------
     envelope = abs(BBdata);
-    envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
-    gain = 60;
-    DR = 60;
+    envelope_dB = 20*log10(envelope/max(envelope(500:end,:), [], 'all')+eps);
+    gain = 80;
+    DR = 80;
     figure;
     image(x_aline*1e3, z*1e3, envelope_dB+gain);
     colormap(gray(DR));colorbar;
