@@ -10,8 +10,8 @@ Npsf        = 100;               % number of simulated PSF set
 Npt         = 5;                 % number of simulated PSFs for one set
 % total # of psf = Npsf*Npt*4
 rngseed     = 7414:7414+Npsf-1;  % random number generator seed
-Npx         = 513;               % final RF/baseband data size after resize for x direction
-Npz         = 513;               % final RF/baseband data size after resize for z direction
+Npx         = 257;               % final RF/baseband data size after resize for x direction
+Npz         = 257;               % final RF/baseband data size after resize for z direction
 fs          = 100e6;             % sampling rate 100 MHz
 soundv      = 1540;              % sound velocity [m/s]
 height      = 5e-3;              % = 5 mm
@@ -32,9 +32,9 @@ fprintf('Now generating... %d psf\n', ii)
 rng(rngseed(ii))
 % --------- parameters ---------
 f0               = (3 + 4.5*rand(1))*1e6; % center freq. 3~7.5 MHz
-% lambda = soundv/f0; dz = soundv/2f0;
+% lambda = soundv/f0; dz = soundv/2fs ;
 % 1 lambda (convert length to # of pixel) = fs/f0 samples;
-lambda_in_sample = fs/f0;                 % lambda length represented in sample. [13.333 33.3333]
+lambda_in_sample = 2*fs/f0;                 % lambda length represented in sample. [13.333 33.3333]
 bw               = 0.5 + 0.3*rand(1);     % fractional bandwidth
 lambda           = soundv/f0;             % = [205.3,513.3] [um]
 dz0              = soundv/fs/2;           % original depth (time) interval, i.e. dz, 2dz/soundv=1/fs
@@ -52,7 +52,7 @@ delay_curve = conv(x, h, 'same');
 % limit delay_curve in [-0.5,0.5]
 delay_curve = (delay_curve - min(delay_curve));  % shift to all positive values
 delay_curve = delay_curve / max(delay_curve);    % limited in [0,1]
-delay_curve_in_time = delay_curve - 0.5;         % limited in [-0.5,0.5]
+delay_curve = delay_curve - 0.5;         % limited in [-0.5,0.5]
 % ------ get full dataset using Field II ------
 field_init(0)
 set_field('fs',fs);
@@ -102,12 +102,12 @@ Nsample = size(full_dataset, 1); % size(v, 1) depending on sampling rate
 
 % ----- scat_dist: scatterer location (x,z) -----
 % scatterer distribution
-den         = 0.1 + 0.7*rand(1);                    % scatterer's density, [0.05,0.5] -> [0.1,0.8]
-Nscat       = round(den*Nsample*FOV);               % number of scatterers with in a patch
-scat_space  = zeros(Nsample,FOV);                   % distribution space size = (Npz,Npx)
+den         = 0.05 + 0.45*rand(1);                    % scatterer's density, [0.05,0.5]
+Nscat       = round(den*Npz*Npx);                   % number of scatterers with in a patch
+scat_space  = zeros(Npz,Npx);                       % distribution space size = (Npz,Npx)
 scat_indice = randi(numel(scat_space),[1,Nscat]);   % scatterer's location at which index
 scat_space(scat_indice) = randn(Nscat,1);           % scatterer's amplitude (random normal)
-scat_space = reshape(scat_space, [Nsample, FOV]);
+scat_space = reshape(scat_space, [Npz, Npx]);
 
 
 % ------ prepare for beamformed RF data ------ 
@@ -135,14 +135,16 @@ index3D  = repelem((0:Nelements-1)*(Nsample+1), Nsample,1,Nelements) + ... % 2-n
 maxdelay = [0, 1, 1.5, 2]/4; % (*pi)
 
 for k = 1:4
+    tic
     aberratedchanneldata  = zeros(Nsample+1,Nelements,Nelements);
-    delay_curve_in_sample = round(delay_curve_in_time * maxdelay(k) * lambda_in_sample); % delay how many samples
+    delay_curve_in_sample = round(delay_curve * maxdelay(k) * lambda_in_sample); % delay how many samples
     for itx = 1:Nelements 
         % full_dataset(:, :, itx): one channel data, obtained by the itx-th transmitting element and all received Nelements.
         % delay_curve1(itx): delay applied to only one tx element
         % delay_curve1: delay applied to all Nelements
         aberratedchanneldata(1:end-1, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
     end
+    toc
     % ------ STA beamforming ------
     RFdata = zeros(Nsample, FOV);
     for Nline = 1:beamspacing*FOV % beamform an aline in one time
@@ -151,18 +153,18 @@ for k = 1:4
         % f_num_mask_tx: where the aperture larger than f # (how many rx elements used, (aperture for different depth, copy the i-th tx element's mask along rx element, which tx element used)
         f_num_mask_rx = double(z./(2*abs(x_aline(Nline) - x_elem)) > f_num); % size = (Nsample, Nelements) = (Nsample, Nelements, 1)
         f_num_mask_tx = reshape(f_num_mask_rx, Nsample, 1, Nelements);      % size = (Nsample, 1, Nelements)
-        Nlinedistance   = distance(:,Nline,:) + squeeze(distance(:,Nline,:));         % distance btw the Nline-th aline and tx + rx
+        Nlinedistance = distance(:,Nline,:) + squeeze(distance(:,Nline,:));         % distance btw the Nline-th aline and tx + rx
         % delay(:,Nline,:): tx delay, (delay at different depth, copy the same delay for each tx element, delay btw the Nline-th aline and i-th element)
         % squeeze(delay(:,Nline,:)): rx delay, (delay at different depth, delay btw all aline and i-th element, copy the same delay for each tx element)
         channel_ind = ceil(Nlinedistance/soundv*fs - Noffset); % convert delay in time to in sample
         channel_ind(channel_ind > Nsample) = Nsample + 1; % limit delay index
-        channel_ind(channel_ind < 1) = Nsample + 1; % limit delay index
-        channel_ind = channel_ind + index3D; % convert the array index to general index
+        channel_ind(channel_ind < 1) = Nsample + 1; % received signal before t=0
+        channel_ind = channel_ind + index3D; % convert array index to general index
         % sum the channel data from the K tx elements and K rx elements,where K is related to the f # mask.
         % dimension means (Nsample, channel data from rx element, channel data from tx element)
         RFdata(:,Nline) = sum(f_num_mask_rx.*f_num_mask_tx.*aberratedchanneldata(channel_ind), [2,3]); 
     end
-    lpf = fir1(48, 0.8*bw*f0/(fs/2))'; % cutoff freq. at 0.8*(bw*f0) Hz
+    lpf = fir1(48, f0/(fs/2))'; % cutoff freq. at 0.8*(bw*f0) Hz
     BBdata = conv2(RFdata.*exp(-1j*2*pi*f0*(0:size(RFdata, 1)-1)'/fs), lpf, 'same');
     % -------- PSF Preprocessing ---------
     envelope = abs(BBdata);
@@ -171,6 +173,8 @@ for k = 1:4
     figure;
     image(x_aline*1e3, z*1e3, envelope_dB+gain);
     colormap(gray(DR));colorbar;
+    xlabel('Lateral position (mm)')
+    ylabel('Depth (mm)')
     axis image;
 
 %     % check delay channel data
@@ -181,22 +185,22 @@ for k = 1:4
 %     end
 
     for ipt = 2:size(positions,1)-1 % start from the second to the next to last point location.
-        [~, pt_start_ind] = min(abs(z - (positions(ipt,3) - shiftrange) )); % start index of a PSF region
-        [~, pt_end_ind] = min(abs(z - (positions(ipt,3) + shiftrange) ));   % end index of a PSF region
-        newz = interp1(pt_start_ind:pt_end_ind, z(pt_start_ind:pt_end_ind), linspace(pt_start_ind,pt_end_ind,Npz));
-        newx = interp1(1:length(x_aline), x_aline, linspace(1,length(x_aline),Npx));
-        psf_rf = RFdata(pt_start_ind:pt_end_ind,:);
-        psf_bb = BBdata(pt_start_ind:pt_end_ind,:);
+        [~, z_pt_start_ind] = min(abs(z - (positions(ipt,3) - 8*lambda) )); % start index of a PSF region
+        [~, z_pt_end_ind] = min(abs(z - (positions(ipt,3) + 8*lambda) ));   % end index of a PSF region
+        [~, x_pt_end_ind] = min(abs(x_aline - 16*lambda)); % start index of a PSF region
+        [~, x_pt_start_ind] = min(abs(x_aline + 16*lambda)); % start index of a PSF region
+        newz = interp1(z_pt_start_ind:z_pt_end_ind, z(z_pt_start_ind:z_pt_end_ind), linspace(z_pt_start_ind,z_pt_end_ind,Npz));
+        newx = interp1(x_pt_start_ind:x_pt_end_ind, x_aline(x_pt_start_ind:x_pt_end_ind), linspace(x_pt_start_ind,x_pt_end_ind,Npx));
+        depth = z(z_pt_start_ind);
+        dx = newx(2) - newx(1);
+        dz = newz(2) - newz(1);
+        newfs = soundv/2/dz;
+        lpf = fir1(48, f0/(newfs/2))';
+        
+        psf_rf = RFdata(z_pt_start_ind:z_pt_end_ind,x_pt_start_ind:x_pt_end_ind);
+        psf_bb = BBdata(z_pt_start_ind:z_pt_end_ind,x_pt_start_ind:x_pt_end_ind);
 
-        % produce speckle
-        speckle_rf = conv2(scat_space(pt_start_ind:pt_end_ind,:), psf_rf, 'same'); % psf is a filter
-        speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./fs), lpf, 'same');
 
-%         % (pt_start_ind:pt_end_ind)'./fs: time compensation at the specific depth
-%         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(pt_start_ind:pt_end_ind)'./fs), lpf, 'same');
-
-        speckle_rf = imresize(speckle_rf, [Npz, Npx]);
-        speckle_bb = imresize(speckle_bb, [Npz, Npx]);
         psf_rf = imresize(psf_rf, [Npz,Npx]);
         psf_bb = imresize(psf_bb, [Npz,Npx]);
 
@@ -206,7 +210,13 @@ for k = 1:4
         subplot(121)
         image(newx*1e3, newz*1e3, envelope_dB+gain);
         colormap(gray(DR));colorbar;
+        xlabel('Lateral position (mm)')
+        ylabel('Depth (mm)')
         axis image;
+
+        % produce speckle
+        speckle_rf = conv2(scat_space, psf_rf, 'same'); % psf is a filter
+        speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
 
         envelope = abs(speckle_bb);
         envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
@@ -214,16 +224,16 @@ for k = 1:4
         subplot(122)
         image(newx*1e3, newz*1e3, envelope_dB+gain);
         colormap(gray(DR));colorbar;
+        xlabel('Lateral position (mm)')
+        ylabel('Depth (mm)')
         axis image;
 
-        depth = z(pt_start_ind);
-        dx = newx(2) - newx(1);
-        dz = newz(2) - newz(1);
-        save(fullfile(savepath,['Data_', num2str(Npt*(ii-1)+(ipt-1)), '_delay_', num2str(k) '.mat']), 'psf_rf', 'psf_bb', 'speckle_rf', 'speckle_bb', 'dx', 'dz', 'depth', 'f0', 'k', 'bw');
+
+        save(fullfile(savepath,['Data_', num2str(Npt*(ii-1)+(ipt-1)), '_delay_', num2str(k) '.mat']), 'psf_rf', 'psf_bb', 'speckle_rf', 'speckle_bb', 'dx', 'dz', 'depth', 'f0', 'k', 'bw', 'delay_curve');
         saveas(fig, fullfile(savepath,['Data_', num2str(Npt*(ii-1)+(ipt-1)), '_delay_', num2str(k), '.png']));
 
     end
 end
-break
 end
 toc
+
