@@ -183,23 +183,30 @@ class GetData(DataPreprocessing):
         numpy.array: 
             training data, testing data
         '''
-        try:
-            print('File is loading ......')
-            train = self.__read_cache(self.dataset[dtype][0])
-            test = self.__read_cache(self.dataset[dtype][1])
-            assert train.shape == self.__output_shape()
-            assert self.seed == 7414
-            return train, test
-        except (FileNotFoundError, AssertionError):
-            print('File is not found or inaccurate, now creating ......')
-            if dtype in {'ideal_psf'}:
-                if self.complex_network:
-                    return self.__slice('psf_bb', flag=True)
-                else:
-                    return self.__slice('psf_rf', flag=True)
+        # try:
+        #     print('File is loading ......')
+        #     train = self.__read_cache(self.dataset[dtype][0])
+        #     test = self.__read_cache(self.dataset[dtype][1])
+        #     assert train.shape == self.__output_shape()
+        #     assert self.seed == 7414
+        #     return train, test
+        # except (FileNotFoundError, AssertionError):
+        #     print('File is not found or inaccurate, now creating ......')
+        #     if dtype in {'ideal_psf'}:
+        #         if self.complex_network:
+        #             return self.__slice('psf_bb', flag=True)
+        #         else:
+        #             return self.__slice('psf_rf', flag=True)
+        #     else:
+        #         return self.__slice(dtype)
+        print('File is creating ...')
+        if dtype in {'ideal_psf'}:
+            if self.complex_network:
+                return self.__slice('psf_bb', flag=True)
             else:
-                return self.__slice(dtype)
-                
+                return self.__slice('psf_rf', flag=True)
+        else:
+            return self.__slice(dtype)
     
     def find_indices(self):
         train_indices = self.indices[:self.num_training]
