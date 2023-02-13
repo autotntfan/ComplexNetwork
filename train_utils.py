@@ -35,6 +35,70 @@ def get_custom_object():
         }
     return custom_object
 
+def read_info(model_name):
+    '''
+     reading the information saved by save_info function
+     this function is in order to check whether the given
+     augments are compatible with loaded model
+    '''
+    saved_dir = os.path.join(DIR_SAVED, model_name)
+    file_name = model_name + '_parameters.txt'
+    if not os.path.exists(saved_dir):
+        raise FileNotFoundError('file does not exist')
+    saved_path = os.path.join(saved_dir, file_name)
+    with open(saved_path, 'r') as f:
+        content = f.read() # type of content is string
+    return eval(content) # convert string to dict
+
+def save_info(model_name, saved_var):
+    '''
+    save the information of parameters, included 
+    epoch. seed. and so on
+    Args:
+        model_name: saved path
+        saved_var: parameters to be preserved
+    '''
+    saved_dir = os.path.join(DIR_SAVED, model_name)
+    file_name = model_name + '_parameters.txt'
+    if not os.path.exists(saved_dir):
+        try:
+            os.mkdir(saved_dir)
+        except FileNotFoundError:
+            os.makedirs(saved_dir)
+    saved_path = os.path.join(saved_dir, file_name)
+    with open(saved_path, 'w') as f:
+        f.write(str(saved_var))
+    
+def save_model(model, history, name):
+    saved_dir = os.path.join(DIR_SAVED, name)
+    model_name = name + '.h5'      # model
+    model_figname = name + 'arc.png'  # model architecture 
+    if not os.path.exists(saved_dir):
+        try:
+            os.mkdir(saved_dir)
+        except FileNotFoundError:
+            os.makedirs(saved_dir)
+    model_saved_path = os.path.join(saved_dir, model_name)
+    model_figpath = os.path.join(saved_dir, model_figname)
+    # plot and save model architecture
+    tf.keras.utils.plot_model(model, to_file=model_figpath, show_shapes=True, show_layer_names=True, dpi=900)
+    model.save(model_saved_path)
+    history_name = os.path.join(saved_dir, name + 'history.txt') # loss value per epoch
+    with open(history_name, 'w') as f:
+        f.write(str(history))
+    plt.figure()
+    plt.plot(history['loss'], label='training loss')
+    try:
+        plt.plot(history['val_loss'], label='val loss')    
+    except KeyError:
+        print('No validation')
+    finally:
+        plt.legend()
+        plt.xlabel('epochs')
+        plt.ylabel('loss')
+        plt.savefig(os.path.join(saved_dir,name+'.png'))
+        plt.show()
+        
 def get_default(complex_network=True):
     batch = 8
     if complex_network:
@@ -172,8 +236,6 @@ def multilevel_IOU(signal1, signal2, OBJ, training=False, model_name=None):
         envelope_ref = B.reduce_dim(B.envelope_detection(signal2[i], np.max(DRs)))
         plt.figure(figsize=(20,20))
         plt.subplot(5,2,1)
-        
-        
         plt.imshow(envelope_pred, cmap='gray', vmin=0, vmax=np.max(DRs),aspect='auto')
         plt.title('prediction')
         plt.subplot(5,2,2)
@@ -206,13 +268,20 @@ def multilevel_IOU(signal1, signal2, OBJ, training=False, model_name=None):
         B.save_fig(model_name, 'IOU_L' + str(levels[i]) + '_' + str(inds[i]), 'IOU')
         plt.show()
     start = 0
+    count = np.zeros((iou.shape[0],1))
+    title_names = ['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB']
     for level in range(1,5):
         level_n_iou = iou[:,levels==level]
         end = start + level_n_iou.shape[1]
         for ii in range(iou.shape[0]):
             plt.figure(ii+1)
             plt.scatter(np.arange(start,end),level_n_iou[ii,:],c=color[level-1])
-            plt.title(str(DRs[ii]) + 'dB')
             plt.ylim((0.0,1.0))
+            plt.xlabel('Sample')
+            plt.ylabel('IOU')
+            plt.title(title_names[ii])
+            B.save_fig(model_name, 'IOU_' + str(ii))
+            count[ii,:] = count[ii,:] + sum(level_n_iou[ii,:]>0.5);
         start = end
+
     
