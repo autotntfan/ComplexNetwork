@@ -30,11 +30,9 @@ class BasedCompute():
     focusing: clip the edge to prevent white artifact due 
               to the Gaussian filter in loss function SSIM.
     save_fig: save figure.
-    save_info: save model information included parameters.
-    read_info: read the file saved by save_info
     projection: obtain lateral or axial projection
     
-    last edit 2022/07/01
+    last edit 2022/07/13
     
     '''
     def __init__(self,
@@ -236,7 +234,7 @@ class BasedCompute():
         data = io.loadmat(file_path) # reading file gets information
         dx = data.get('dx') * (self.DATA_SIZE[2]/W)
         dz = data.get('dz') * (self.DATA_SIZE[1]/H)
-        depth = data.get('depth')/2
+        depth = data.get('depth')
         x_axis = np.linspace(0,dx*W-dx,W) * 1e3 # [mm]
         z_axis = np.linspace(0,dz*H-dz,H) * 1e3 + depth * 1e3 # [mm]
         xmin, xmax = (np.min(x_axis), np.max(x_axis))
@@ -268,9 +266,9 @@ class BasedCompute():
         data = io.loadmat(file_path) # reading file gets information
         delay = data.get('delay_curve')
         if self._level != 1:
-            return delay*self._level/8
+            return delay*self._level/8*2
         else:
-            return delay*0;
+            return delay*0
     
     def angle(self, signal):
         '''
@@ -340,40 +338,6 @@ class BasedCompute():
                         os.makedirs(path)
                 name = os.path.join(path, saved_name + '.png')
             plt.savefig(name, dpi=300)
-            
-    def save_info(self, model_name, saved_var):
-        '''
-        save the information of parameters and model, included 
-        epoch. seed. and so on
-        Args:
-            model_name: saved path
-            saved_var: parameters to be preserved
-        '''
-        saved_dir = os.path.join(r'./modelinfo', model_name)
-        file_name = model_name + '_parameters.txt'
-        if not os.path.exists(saved_dir):
-            try:
-                os.mkdir(saved_dir)
-            except FileNotFoundError:
-                os.makedirs(saved_dir)
-        saved_path = os.path.join(saved_dir, file_name)
-        with open(saved_path, 'w') as f:
-            f.write(str(saved_var))
-            
-    def read_info(self, model_name):
-        '''
-         reading the information saved by save_info function
-         this function is in order to check whether the given
-         augments are compatible with loaded model
-        '''
-        saved_dir = os.path.join(r'./modelinfo', model_name)
-        file_name = model_name + '_parameters.txt'
-        if not os.path.exists(saved_dir):
-            raise FileNotFoundError('file does not exist')
-        saved_path = os.path.join(saved_dir, file_name)
-        with open(saved_path, 'r') as f:
-            content = f.read() # type of content is string
-        return eval(content) # convert string to dict
        
     def projection(self, signal, DR=None, direction='lateral', vmin=None):
         '''
@@ -479,7 +443,6 @@ class Difference(BasedCompute):
         DRs = DRs + [DR] if DR%20 else DRs
         mask1 = np.zeros((len(DRs),) + signal1.shape)
         mask2 = np.zeros((len(DRs),) + signal1.shape)
-        print(mask1.shape)
         for ii, DRmax in enumerate(DRs):
             if DRmax == 0:
                 mask1[ii,:] = signal1 < 0
