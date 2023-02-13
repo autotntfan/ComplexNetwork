@@ -34,7 +34,7 @@ class Fig(Difference):
         '''
         img = self.reduce_dim(img) # reshape to [H,W]
         plt.figure()
-        plt.imshow(img, cmap='gray', vmin=0, vmax=vmax, extent=axis, aspect='auto')
+        plt.imshow(img, cmap='gray', vmin=-vmax, vmax=0, extent=axis, aspect='auto')
         if title_name is not None:
             plt.title(title_name)
         plt.colorbar()
@@ -85,7 +85,7 @@ class Fig(Difference):
             axis = self.get_axis(img, ind)
         else:
             axis = None
-        img = self.envelope_detection(img, DR)
+        img = self.envelope_detection(img, 0)
         img = self.reduce_dim(img)
         if self._level is not None:    
             saved_name = saved_name + '_' + str(self._level)
@@ -171,7 +171,7 @@ class Fig(Difference):
         plt.xlabel('element')
         plt.ylabel('delay (pi)')
         plt.title(title_name)
-        plt.ylim((-0.3,0.3))
+        plt.ylim((-0.5,0.5))
         self.save_fig(*args, **kwargs)
         
     def err_fig(self, pred, truth, OBJ, model_name=None):
@@ -268,7 +268,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
 
         bestnerror = np.argsort(err['maxerr'])[:n]
         for ind in bestnerror:
@@ -277,7 +277,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs) 
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
         
         worstnerror = np.argsort(err['LBPD'])[-n:]
         for ind in worstnerror:
@@ -286,7 +286,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
         
         bestnerror = np.argsort(err['LBPD'])[:n]
         for ind in bestnerror:
@@ -295,7 +295,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], saved_name=name + '_lateral', **kwargs)
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
 
         worstnerror = np.argsort(err['ABPD'])[-n:]
         for ind in worstnerror:
@@ -304,7 +304,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], direction='axial', saved_name=name + '_axial', **kwargs)
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
 
         bestnerror = np.argsort(err['ABPD'])[:n]
         for ind in bestnerror:
@@ -313,7 +313,7 @@ class Fig(Difference):
             self.envelope_fig(truth[ind], title_name=name + '_t', saved_name=name + '_t', **kwargs)
             self.complex_diff_fig(pred[ind], truth[ind], title_name=name, saved_name=name, **kwargs)
             self.project_fig(pred[ind], truth[ind], direction='axial', saved_name=name + '_axial', **kwargs)    
-            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'dealy', **kwargs)
+            self.delay_fig(delay['delay'][ind], name, saved_name=name + 'delay', **kwargs)
 
 
 class VerifyPred(Fig):
@@ -356,11 +356,11 @@ class VerifyPred(Fig):
     
     @property
     def show_lateral_projection(self):
-        self.project_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), self.DR, 'lateral', self.model_name, 'lateral')
+        self.project_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), 0, 'lateral', self.model_name, 'lateral')
     
     @property
     def show_axial_projection(self):
-        self.project_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), self.DR, 'axial', self.model_name, 'axial')
+        self.project_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), 0, 'axial', self.model_name, 'axial')
         
     def show_phase_diff(self, threshold=None):
         self.phase_diff_fig(self.focusing(self._pred_img), self.focusing(self._truth_img), 'angle diff ' + str(self.ind), threshold, self.model_name)
