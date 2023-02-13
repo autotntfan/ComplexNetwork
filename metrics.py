@@ -65,7 +65,7 @@ class Metrics(Difference):
     def __ssim_core(self, signal1, signal2, func, **kwargs):
         assert signal1.shape == signal2.shape
         filter_size = kwargs['filter_size']
-        del kwargs['filter_size']
+        kwargs.pop('filter_size')
         signal1, signal2 = self.normalization(signal1), self.normalization(signal2)
         signal1, signal2 = self.__preprocessing(signal1, signal2, **kwargs)
         if kwargs['envelope']:
@@ -82,12 +82,12 @@ class Metrics(Difference):
     def __error_core(self, signal1, signal2, func, **kwargs):
         assert signal1.shape == signal2.shape
         avg = kwargs['avg']
-        del kwargs['avg']
+        kwargs.pop('avg')
         signal1, signal2 = self.__preprocessing(signal1, signal2, **kwargs)
         if signal1.ndim == 4 and not avg:
             return np.mean(np.sum(func(signal1 - signal2), axis=(1,2,3)))
         else:
-            return np.mean(func(signal1 - signal2))            
+            return np.mean(func(signal1 - signal2))
 
     def __preprocessing(self, signal1, signal2, focusing=False, envelope=False):
         if focusing:
