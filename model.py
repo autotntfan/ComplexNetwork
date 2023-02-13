@@ -59,9 +59,13 @@ class Model():
             input_shape = x[0].shape[1:]
             self.forward = True
         else:
-            input_shape = x.shape[1:]       
+            input_shape = x.shape[1:]
         model = self.build_model(input_shape)
+        # lr_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay([50,100],
+                                                                            # [self.lr,0.5*self.lr,0.1*self.lr])
+        # model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9), loss=self.losses)
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr), loss=self.losses)
+        # model.compile(optimizer=tf.keras.optimizers.Nadam(learning_rate=self.lr), loss=self.losses)
         model.summary()
         history = model.fit(x, y,
                             validation_split=self.validation_rate,
@@ -112,7 +116,8 @@ class Model():
             )
         if self.apply_batchnorm:
             result.add(self.bnFunc())
-        
+        if self.dropout_rate:
+            result.add(Dropout(self.dropout_rate))
         result.add(self.activations())
         result.add(self.convFunc(filters, size, padding='same', use_bias=False))
         if self.apply_batchnorm:
@@ -128,7 +133,8 @@ class Model():
             result.add(self.convFunc(filters, size, strides=2, padding='same', transposed=True))
         else:
             result.add(Conv2DTranspose(filters, size, strides=2, padding='same'))
-        result.add(self.bnFunc())
+        if self.apply_batchnorm:
+            result.add(self.bnFunc())
         if self.dropout_rate:
             result.add(Dropout(self.dropout_rate))
         result.add(self.activations())
@@ -143,22 +149,22 @@ class Model():
         if self.forward:
             inputs_forward = Input(self.input_shape)
         down_stack = [
-            self.downsample(4*self.filters, self.size), #(bs, 128, 128, 32*2)
-            self.downsample(8*self.filters, self.size),  #(bs, 64, 64, 64*2)
-            self.downsample(16*self.filters, self.size),  #(bs, 32, 32, 128*2)
-            self.downsample(32*self.filters, self.size),  #(bs, 16, 16, 256*2)
-            self.downsample(64*self.filters, self.size), #(bs, 8, 8, 512*2)
-            self.downsample(64*self.filters, self.size), #(bs, 4, 4, 512*2)
+            self.downsample(4*self.filters, self.size), #(bs, 64, 128, 32*2)
+            self.downsample(8*self.filters, self.size),  #(bs, 32, 64, 64*2)
+            self.downsample(16*self.filters, self.size),  #(bs, 16, 32, 128*2)
+            self.downsample(32*self.filters, self.size),  #(bs, 8, 16, 256*2)
+            self.downsample(64*self.filters, self.size), #(bs, 4, 8, 512*2)
+            self.downsample(64*self.filters, self.size), #(bs, 2, 4, 512*2)
             ]
         up_stack = [
-            self.upsample(64*self.filters, self.size), #(bs, 8, 8, 512*2)
-            self.upsample(32*self.filters, self.size), #(bs, 16, 16, 512*2)
-            self.upsample(16*self.filters, self.size),  #(bs, 32, 32, 256*2)
-            self.upsample(8*self.filters, self.size),  #(bs, 64, 64, 128*2)
-            self.upsample(4*self.filters, self.size),  #(bs, 128, 128, 64*2)
+            self.upsample(64*self.filters, self.size), #(bs, 4, 8, 512*2)
+            self.upsample(32*self.filters, self.size), #(bs, 8, 16, 512*2)
+            self.upsample(16*self.filters, self.size),  #(bs, 16, 32, 256*2)
+            self.upsample(8*self.filters, self.size),  #(bs, 32, 64, 128*2)
+            self.upsample(4*self.filters, self.size),  #(bs, 64, 128, 64*2)
             ]
         if self.complex_network:
-            last = self.convFunc(2*self.filters, self.size, strides=2, padding='same', transposed=True) #(bs, 256, 256, 16*2)
+            last = self.convFunc(2*self.filters, self.size, strides=2, padding='same', transposed=True) #(bs, 128, 256, 16*2)
         else:
             last = Conv2DTranspose(2*self.filters, self.size, strides=2, padding='same')
         x = inputs
@@ -267,9 +273,9 @@ class Model():
                 loss_valid_epoch.append(self.test_step(x_batch_val, y_batch_val))
             history['val_loss'].append(np.mean(loss_valid_epoch))
             e = time.time()
-            print(f'{epoch+1}/{self.epochs} - {(e-s):.2f}s - ' \
-                  f'loss:{np.mean(loss_train_epoch):.4e} - ' \
-                  f'val_loss:{np.mean(loss_valid_epoch):.4e} \n')
+            print(f'Epoch:{epoch+1}/{self.epochs} - {(e-s):.1f}s - ' \
+                  f'loss:{np.mean(loss_train_epoch):.6f} - ' \
+                  f'val_loss:{np.mean(loss_valid_epoch):.6f} \n')
         return self.model, history
     
     @tf.function
