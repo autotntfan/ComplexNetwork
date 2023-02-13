@@ -13,7 +13,7 @@ except RuntimeError as e:
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from train_utils import get_custom_object, get_default
-from train_utils import save_model, save_metrics
+from train_utils import save_info, read_info, save_model, multilevel_IOU
 from newdataset import DataPreprocessing, GetData
 from model import Model
 from DisplayedImg import VerifyPred, Fig
@@ -43,7 +43,7 @@ BATCH_SIZE         = 8       # mini-batch size
 LR                 = 1e-4    # learning rate of optimizer
 EPOCHS             = 200     # training epochs
 VALIDATION_SPLIT   = 0.2     # ratio of validation data referred to training data. ratio = # of val_data/ # of training_data
-NFIG               = 93       # show the n-th fig of speckle, target, or prediction
+NFIG               = 30       # show the n-th fig of speckle, target, or prediction
 DR                 = 60      # dynamic range in dB
 SEED               = 7414
 
@@ -73,7 +73,6 @@ if FORWARD:
 else:
     (x_train, y_train), (x_test, y_test) = get_dataset()
 
-
 if LOAD_MODEL:
     # custom model needs to add custom function
     custom_object = get_custom_object()
@@ -82,15 +81,11 @@ if LOAD_MODEL:
         prediction = model.predict([x_test, ideal_test])
     else:
         if COMPLEX:
-            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_13042022'
-            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_30032022'
-            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_10042022'
+            # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_03092022'
             # model_name = 'complexmodel_Notforward_200_SSIM_MSE_LeakyReLU_20042022'
             # model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_18042022'
             # model_name = 'complexmodel_Notforward_300_SSIM_LeakyReLU_22042022'
             # model_name = 'complexmodel_Notforward_200_MS_SSIM_LeakyReLU_23042022'
-            # model_name = 'complexmodel_Notforward_200_SSIM_MSE_LeakyReLU_29042022'
-            # model_name = 'complexmodel_Notforward_200_SSIM_LeakyReLU_29042022'
             # model_name = 'complexmodel_Notforward_300_SSIM_LeakyReLU_30042022'
             # model_name = 'complexmodel_Notforward_300_SSIM_LeakyReLU_30042022_filter5'
             # model_name = 'complexmodel_Notforward_200_ComplexMSE_LeakyReLU_28042022'
@@ -108,9 +103,8 @@ if LOAD_MODEL:
             # model_name = 'complexmodel_Notforward_200_ComplexMSE_FLeakyReLU_22052022'
             # model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_14052022'
             # model_name = 'complexmodel_Notforward_200_SSIM_MSE_FLeakyReLU_25052022'
-            model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_30052022'
-            # model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_13062022'
-            # model_name = 'complexmodel_Notforward_198_SSIM_MSE_FLeakyReLU_24052022'
+            # model_name = 'complexmodel_Notforward_200_SSIM_FLeakyReLU_30052022'
+            model_name = 'complexmodel_Notforward_300_SSIM_FLeakyReLU_14012023'
         else:
             # model_name = 'realmodel_Notforward_200_MSE_LeakyReLU_30032022'
             # model_name = 'realmodel_Notforward_200_SSIM_LeakyReLU_19042022'
@@ -149,13 +143,13 @@ else:
         model, history = UNet([x_train, ideal_train], y_train)
         prediction = model.predict([x_test, ideal_test])
     else:
-        model, history = UNet(x_train, y_train)
-        # model, history = UNet.running(x_train, y_train)
+        # model, history = UNet(x_train, y_train)
+        model, history = UNet.running(x_train, y_train)
         prediction = model.predict(x_test)
     data_info.update(UNet.info())
-    save_model(model, history.history, model_name)
-        # save_model(model, history, model_name)
-    B.save_info(model_name, data_info)
+    # save_model(model, history.history, model_name)
+    save_model(model, history, model_name)
+    save_info(model_name, data_info)
 level, ind =  get_dataset.find_level(NFIG, train=False)
 V = VerifyPred(prediction[NFIG],
                y_test[NFIG],
@@ -173,6 +167,7 @@ V.show_complex_diff()
 V.show_phase_diff()
 Fig().err_fig(prediction, y_test, get_dataset, model_name)
 Fig().topn_err_fig(prediction, y_test, get_dataset, 5, model_name)
+# multilevel_IOU(prediction, y_test, get_dataset,model_name=model_name)
 # show_fig(prediction[NFIG], ind, 'prediction' + str(level), DR, model_name)
 # show_fig(y_test[NFIG], ind, 'psf' + str(level), DR, model_name)
 
@@ -180,3 +175,7 @@ Fig().topn_err_fig(prediction, y_test, get_dataset, 5, model_name)
 M = Metrics()
 M.save_info(prediction, y_test, model_name)
 tf.keras.backend.clear_session()
+
+M.mse(prediction[NFIG],y_test[NFIG])
+M.ssim(prediction[NFIG],y_test[NFIG], focusing=True)
+
