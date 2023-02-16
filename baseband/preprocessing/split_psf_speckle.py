@@ -171,7 +171,7 @@ class GetData(DataPreprocessing):
                  DIRETORY=constant.CACHEPATH,
                  **kwargs):
         super().__init__(**kwargs)
-        self.factor = factor # downsampling factor
+        self.factor = factor # downsampling factor along axial direction
         self.num_training = num_training # number of training data
         self.complex_network = complex_network # use RF or BB model
         self.forward = forward # whether use forward path
