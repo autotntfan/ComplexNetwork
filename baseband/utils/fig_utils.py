@@ -28,7 +28,7 @@ else:
     from ..setting import constant
     from .data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from .info import get_axis, get_level, get_sampling_rate, get_delaycurve
-    from .analysis import complex_diff, phase_diff, BPD, IOU
+    from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic
 
 # ------------------------- basic figure -------------------------
 def save_fig(model_name=None, saved_name=None, saved_dir=None):
@@ -209,7 +209,7 @@ def complex_diff_fig(img1, img2, ind=None, title_name='', model_name=None, saved
     '''
     Show real- and imaginary-part difference.
     '''
-    assert img1.shape == img2.shape1
+    assert img1.shape == img2.shape
     axis = None if ind is None else get_axis(img1, ind)
     err_real, err_imag = complex_diff(img1, img2)
     heatmap(err_real, axis, 'Real diff ' + str(title_name), model_name, 'realpartdiff_' + saved_name, *args, **kwargs)
@@ -259,86 +259,7 @@ def delay_fig(delay, title_name='Delay curve', *args, **kwargs):
     plt.ylim((-0.5,0.5))
     save_fig(*args, **kwargs)
 
-# -------------------------
-def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, model_name=None, **kwargs):
-    '''
-    Plot from the best to worst lateral or axial beam pattern projection with respect to the different phase
-    aberration level.
-    
-    Args:
-        pred: ndarray, prediction.
-        ref: ndarray, ground truth.
-        levels: scalar or vector, phase aberration level.
-        inds: scalar or vector, indices of signal1.
-        direction: string, only allow 'lateral' and 'axial'.
-        focus: boolean, whether edge is removed.
-        **kwargs:
-            gain: scalar, gain for log compression.
-            vmin: the minimum value of projection,
-                i.e. vmin=0, gain=60 then value<0 would be forced to 0
-        
-    '''
-    assert pred.shape == ref.shape
-    if focus:
-        pred, ref = focusing(pred), focusing(ref)
-    proj_pred, proj_ref = projection(pred, 0), projection(ref, 0)
-    delay = np.zeros((pred.shape[0],constant.NELEMENT))
-    for ii in range(pred.shape[0]):
-        delay[ii] = get_delaycurve(inds[ii])
-    BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
-    colors = ['red','green','blue','black']
-    labels = ['level1','level2','level3','level4']
-    for level in range(1,5):
-        sortind = np.argsort(BPDs[levels==level])
-        Ldelay = delay[sortind] # level-n delay
-        Lproj_pred = proj_pred[sortind] # level-n predicted projection
-        Lproj_ref = proj_ref[sortind] # level-n reference projection
-        LBPDs = BPDs[sortind] # level-n BPD
-        Linds = inds[sortind] # level-n index
-        Lpred = pred[sortind] # level-n prediction
-        Lref = ref[sortind] # level-n reference
-        Ldelay = delay[sortind] # level-n delay curve
-        
-        plt.figure(1)
-        plt.plot(np.mean(Lproj_pred,axis=0), color=colors[level-1],label=labels[level-1])
-        plt.title('Prediction')
-        plt.legend()
-        plt.show()
-        plt.figure(2)
-        plt.plot(np.mean(Lproj_ref,axis=0), color=colors[level-1],label=labels[level-1])
-        plt.title('Ground truth')
-        plt.legend()
-        plt.show()
-        
-        for ii in range(np.size(LBPDs)):
-            dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
-            saved_name = 'L' + str(level) + '_i' + str(Linds[ii]) # saved name e.g. L4_i129
-            plt.figure()
-            plt.plot(Lproj_pred[ii], label='Prediction')
-            plt.plot(Lproj_ref[ii], linestyle='dashed',label='Ground truth')
-            plt.title(f"level-{level} {direction} projection_i{inds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
-            plt.legend()
-            save_fig(model_name, saved_name + 'proj', dir_)
-            plt.show()
-            envelope_fig(Lpred[ii], title_name='Prediction Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Prediction_Bmode',saved_dir=dir_)
-            envelope_fig(Lref[ii], title_name='Ground truth Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Groundtruth_Bmode', saved_dir=dir_)
-            delay_fig(Ldelay[ii], title_name='Delay curve_i' + str(Linds[ii]), model_name=model_name, saved_name=saved_name+'delay', saved_dir=dir_)
-        # draw PR25, PR50, PR75, PR99 projection of prediction and reference
-        plt.figure()
-        plt.plot(np.mean(Lproj_pred[:ii//4],axis=0), label='0.25p', color='green')
-        plt.plot(np.mean(Lproj_pred[ii//4:2*ii//4], axis=0), label='0.50p', color='blue')
-        plt.plot(np.mean(Lproj_pred[2*ii//4:3*ii//4],axis=0), label='0.75p', color='red')
-        plt.plot(np.mean(Lproj_pred[3*ii//4:],axis=0), label='1.00p', color='black')
-        plt.plot(np.mean(Lproj_ref[:ii//4], axis=0), linestyle='dashed', label='0.25t', color='green')
-        plt.plot(np.mean(Lproj_ref[ii//4:2*ii//4], axis=0), linestyle='dashed', label='0.50t', color='blue')
-        plt.plot(np.mean(Lproj_ref[2*ii//4:3*ii//4], axis=0), linestyle='dashed', label='0.75t', color='red')
-        plt.plot(np.mean(Lproj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
-        plt.legend()
-        save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
-        plt.show()
-        
-        
-
+# ------------------------- displayed according to phase aberration level -------------------------
 def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         '''
         This function evaluates the performance of model, indclued mean squared error and error distribution.
@@ -346,9 +267,17 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         worst 5 images will be shown.
             Args:
                 pred: Numpy array, predicted images.
-                truth: Numpy array, ground truth images.
-                OBJ: Class, in order to find the aberrated level of each image.
+                ref: Numpy array, ground truth images.
+                levels: scalar or vector, phase aberration level.
+                inds: scalar or vector, indices of signal1.
+                focus: boolean, whether edge is removed.
                 model_name: String, saved directory.
+                kwargs:
+                    normalize: boolean, do or not do normalization.
+                    gain: scalar, gain for log compression.
+                    vmin: the minimum value of projection,
+                        i.e. vmin=0, gain=60 then value<0 would be forced to 0
+                        and the max value is 60
         '''
         assert pred.shape == ref.shape
         if focus:
@@ -392,13 +321,131 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         # complex-valued max error
         boxplot(err, 'level', 'maxerr', title_name='Max error', model_name=model_name, saved_name='complexmaxerrorboxplot')
         # 2-branch error summation
-        boxplot(err_2channel, 'level', 'sumerr', title_name='Error summation', model_name=model_name, saved_name='2Berrorboxplot')
+        boxplot(err_2channel, 'level', 'sumerr', 'channel', title_name='2-branch error summation', model_name=model_name, saved_name='2Berrorboxplot')
         # 2-branch max error
-        boxplot(err_2channel, 'level', 'maxerr', title_name='Max error', model_name=model_name, saved_name='2Bmaxerrorboxplot')
+        boxplot(err_2channel, 'level', 'maxerr', 'channel', title_name='2-branch max error', model_name=model_name, saved_name='2Bmaxerrorboxplot')
         # lateral projection error
         boxplot(err, 'level', 'LBPD', title_name='LBPD', model_name=model_name, saved_name='LBPDboxplot')
         # Axial projection error
         boxplot(err, 'level', 'ABPD', title_name='ABPD', model_name=model_name, saved_name='ABPDboxplot')
+
+def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs):
+    '''
+    Show best and worst prediction according to L2 norm and beam pattern projection difference.
+    kwargs:
+        normalize: boolean, do or not do normalization.
+        gain: scalar, gain for log compression.
+        vmin: the minimum value of projection,
+            i.e. vmin=0, gain=60 then value<0 would be forced to 0
+            and the max value is 60
+    '''
+    assert pred.shape == ref.shape
+    if focus:
+        pred = focusing(pred)
+        ref = focusing(ref)
+    err, _ , delay = err_statistic(pred, pred, levels, inds, **kwargs)
+    kwargs = {
+        'model_name':model_name,
+        'saved_dir':'BestWorstPerformance'
+        }
+    
+    def drawfig(data1, data2, delaycurve, name, **kwargs):
+        envelope_fig(data1, title_name=name + '_pred', saved_name=name + '_pred', **kwargs)
+        envelope_fig(data2, title_name=name + '_ref', saved_name=name + '_ref', **kwargs)
+        complex_diff_fig(data1, data2, title_name=name, saved_name=name, **kwargs)
+        project_fig(data1, data2, saved_name=name + '_lateralprojection', **kwargs)
+        delay_fig(delaycurve, name, saved_name=name + 'delaycurve', **kwargs)
+        
+    keys = ['sumerr', 'LBPD', 'ABPD']
+    for key in keys:
+        keyinds = np.hstack([np.argsort(err[key])[:n], np.argsort(err[key])[-n:]])
+        for ii, ind in enumerate(keyinds):
+            if ii < n:
+                name = 'worst' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+            else:
+                name = 'best' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+            drawfig(pred[ind], ref[ind], delay['delay'][ind], name, **kwargs)
+        
+def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, model_name=None, **kwargs):
+    '''
+    Plot from the best to worst lateral or axial beam pattern projection with respect to the different phase
+    aberration level.
+    
+    Args:
+        pred: ndarray, prediction.
+        ref: ndarray, ground truth.
+        levels: scalar or vector, phase aberration level.
+        inds: scalar or vector, indices of signal1.
+        direction: string, only allow 'lateral' and 'axial'.
+        focus: boolean, whether edge is removed.
+        **kwargs:
+            gain: scalar, gain for log compression.
+            vmin: the minimum value of projection,
+                i.e. vmin=0, gain=60 then value<0 would be forced to 0
+        
+    '''
+    assert pred.shape == ref.shape
+    if focus:
+        pred, ref = focusing(pred), focusing(ref)
+    proj_pred, proj_ref = projection(pred, 0), projection(ref, 0)
+    delay = np.zeros((pred.shape[0],constant.NELEMENT))
+    for ii in range(pred.shape[0]):
+        delay[ii] = get_delaycurve(inds[ii])
+    BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
+    colors = ['red','green','blue','black']
+    labels = ['level1','level2','level3','level4']
+    for level in range(1,5):
+        sortind = np.argsort(BPDs[levels==level])
+        Ldelay = delay[sortind] # level-n delay
+        Lproj_pred = proj_pred[sortind] # level-n predicted projection
+        Lproj_ref = proj_ref[sortind] # level-n reference projection
+        LBPDs = BPDs[sortind] # level-n BPD
+        Linds = inds[sortind] # level-n index
+        Lpred = pred[sortind] # level-n prediction
+        Lref = ref[sortind] # level-n reference
+        Ldelay = delay[sortind] # level-n delay curve
+        
+        plt.figure(1)
+        plt.plot(np.mean(Lproj_pred,axis=0), color=colors[level-1],label=labels[level-1])
+        plt.title('Prediction')
+        plt.legend()
+        save_fig(model_name,'avgLBPDprediction')
+        plt.close()
+        plt.figure(2)
+        plt.plot(np.mean(Lproj_ref,axis=0), color=colors[level-1],label=labels[level-1])
+        plt.title('Ground truth')
+        plt.legend()
+        save_fig(model_name,'avgLBPDreference')
+        plt.close()
+        
+        for ii in range(np.size(LBPDs)):
+            dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
+            saved_name = 'L' + str(level) + '_i' + str(Linds[ii]) # saved name e.g. L4_i129
+            plt.figure()
+            plt.plot(Lproj_pred[ii], label='Prediction')
+            plt.plot(Lproj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.title(f"level-{level} {direction} projection_i{inds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
+            plt.legend()
+            save_fig(model_name, saved_name + 'proj', dir_)
+            plt.close()
+            envelope_fig(Lpred[ii], title_name='Prediction Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Prediction_Bmode',saved_dir=dir_)
+            envelope_fig(Lref[ii], title_name='Ground truth Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Groundtruth_Bmode', saved_dir=dir_)
+            delay_fig(Ldelay[ii], title_name='Delay curve_i' + str(Linds[ii]), model_name=model_name, saved_name=saved_name+'delay', saved_dir=dir_)
+            if ii%10 == 0:
+                print(f'Now plotting IOU .... >> {ii}/{np.size(LBPDs)}')
+        # draw PR25, PR50, PR75, PR99 projection of prediction and reference
+        plt.figure()
+        plt.plot(np.mean(Lproj_pred[:ii//4],axis=0), label='0.25p', color='green')
+        plt.plot(np.mean(Lproj_pred[ii//4:2*ii//4], axis=0), label='0.50p', color='blue')
+        plt.plot(np.mean(Lproj_pred[2*ii//4:3*ii//4],axis=0), label='0.75p', color='red')
+        plt.plot(np.mean(Lproj_pred[3*ii//4:],axis=0), label='1.00p', color='black')
+        plt.plot(np.mean(Lproj_ref[:ii//4], axis=0), linestyle='dashed', label='0.25t', color='green')
+        plt.plot(np.mean(Lproj_ref[ii//4:2*ii//4], axis=0), linestyle='dashed', label='0.50t', color='blue')
+        plt.plot(np.mean(Lproj_ref[2*ii//4:3*ii//4], axis=0), linestyle='dashed', label='0.75t', color='red')
+        plt.plot(np.mean(Lproj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
+        plt.legend()
+        save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
+        plt.show()
 
 def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
     '''
@@ -466,48 +513,21 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             plt.ylim((0.0,1.0))
             save_fig(model_name, 'IOU_' + str(iDR))
         start = end
-        
-# def leveln_projection(signal1, signal2, levels, inds, focus=True, model_name=None):
-#     assert signal1.shape == signal2.shape
-#     if focus:
-#         signal1, signal2 = focusing(signal1), focusing(signal2)
-#     proj_pred = projection(signal1, 0)
-#     proj_ref = projection(signal2, 0)
-#     colors = ['red','green','blue','black']
-#     labels = ['level1','level2','level3','level4']
-#     for level in range(1,5):
-#         plt.figure()
-#         plt.plot(np.mean(proj_pred[levels==level],axis=0), color=colors[level-1],label='PredictionL' + str(level))
-#         plt.plot(np.mean(proj_ref[levels==level],axis=0), color=colors[level-1],linestyle='dashed',label='ReferenceL' + str(level))
-#         plt.title(labels[level-1])
-#         plt.legend()
-#         plt.show()
-#     plt.figure()
-#     for i in range(1,5):
-#         pred_proj = np.mean(proj_pred[levels==i],axis=0)
-#         plt.plot(pred_proj, color=color[i-1],label=labels[i-1])
-#     plt.title('prediction')
-#     plt.legend()
-#     plt.show()
-#     plt.figure()
-#     for i in range(1,5):
-#         true_proj = np.mean(proj_true[levels==i],axis=0)
-#         plt.plot(true_proj, color=color[i-1], linestyle='dashed',label=labels[i-1])
-#     plt.title('truth')
-#     plt.legend()
-#     plt.show()
+    plt.show()
 
-def multilevel_projection_m(pred, truth, OBJ):
-    pred = focusing(pred)
-    truth = focusing(truth)
-    proj_pred = projection(pred, 0)
-    proj_true = projection(truth, 0)
-    levels = np.zeros(pred.shape[0], int)
-    pred_proj = np.zeros((4,pred.shape[2]))
-    true_proj = np.zeros((4,pred.shape[2]))
-    for i in range(pred.shape[0]):
-        levels[i], _ = OBJ.find_level(i, train=False)
-    for i in range(1,5):
-        pred_proj[i-1,:] = np.mean(proj_pred[levels==i],axis=0)
-        true_proj[i-1,:] = np.mean(proj_true[levels==i],axis=0)
-    return pred_proj,true_proj
+
+
+# def multilevel_projection_m(pred, truth, OBJ):
+#     pred = focusing(pred)
+#     truth = focusing(truth)
+#     proj_pred = projection(pred, 0)
+#     proj_true = projection(truth, 0)
+#     levels = np.zeros(pred.shape[0], int)
+#     pred_proj = np.zeros((4,pred.shape[2]))
+#     true_proj = np.zeros((4,pred.shape[2]))
+#     for i in range(pred.shape[0]):
+#         levels[i], _ = OBJ.find_level(i, train=False)
+#     for i in range(1,5):
+#         pred_proj[i-1,:] = np.mean(proj_pred[levels==i],axis=0)
+#         true_proj[i-1,:] = np.mean(proj_true[levels==i],axis=0)
+#     return pred_proj,true_proj
