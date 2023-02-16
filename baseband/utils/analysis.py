@@ -256,7 +256,7 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         }
     err = {
         'maxerr':np.max(np.sqrt(real_diff**2 + imag_diff**2),axis=(1,2,3)), # max L2 norm for each signal
-        'sumerr':np.sum(np.sqrt(real_diff**2 + real_diff),axis=(1,2,3)), # sum L2 norm for each signal
+        'sumerr':np.sum(np.sqrt(real_diff**2 + real_diff**2),axis=(1,2,3)), # sum L2 norm for each signal
         'LBPD':BPD(signal1, signal2, direction='lateral', *args, **kwargs), 
         'ABPD':BPD(signal1, signal2, direction='axial', *args, **kwargs),
         'level':levels,
