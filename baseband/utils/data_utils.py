@@ -17,9 +17,11 @@ if __name__ == '__main__':
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
+    from baseband.utils.info import get_sampling_rate, get_data
     sys.path.remove(addpath)
 else:
     from ..setting import constant
+    from .info import get_sampling_rate, get_data
 import scipy.signal      as Signal
 import numpy as np
 import cv2
@@ -62,6 +64,69 @@ def convert_to_complex(inputs):
             return real + 1j*imag
     else:
         raise ValueError(f'Unrecognized complex array with shape {shape}')
+        
+def bbdemodulate(signals, inds):
+    '''
+    Baseband demodulation
+    '''
+    if np.iscomplex(signals).any():
+        # complex dtype
+        return signals
+    # real dtype
+    try:
+        N = len(inds)
+    except TypeError:
+        N = len(np.asarray([inds]))
+    if N == 1:
+        if signals.shape[-1]%2 == 0:
+            # BB data [H,W,C]
+            real, imag = split_complex(signals)
+            return real + 1j*imag
+        # [H,W,C], [H,W]
+        fc = np.squeeze(get_data(inds, 'f0'))
+        fs = get_sampling_rate(signals, inds)
+        t = np.arange(0,signals.shape[0])/fs
+        t = t.reshape((signals.shape[0],1))
+        lpf = Signal.firwin(constant.FIRORDER, fc/(fs/2))
+        twoDsignal = reduce_dim(signals)*np.exp(-1j*2*np.pi*fc*t)
+        assert twoDsignal.ndim == 2
+        assert lpf.ndim ==1
+        twoDsignal = np.apply_along_axis(Signal.convolve, 0, twoDsignal, lpf, 'same')
+        # [H,W,C]
+        if signals.shape[-1] in {1,2}:
+            # RF data [H,W,C]
+            return twoDsignal.reshape(signals.shape)  
+        else:
+            # [H,W] only RF
+            return twoDsignal
+    else:
+        # [N,H,W,C], [N,H,W]
+        # BB data [N,H,W,C]
+        if signals.ndim == 4 and signals.shape[-1]%2 == 0:
+            real, imag = split_complex(signals)
+            return real + 1j*imag
+        
+        bbsignal = np.zeros_like(signals, dtype=np.complex64)
+        for ii in range(len(signals)):
+            fc = np.squeeze(get_data(inds[ii], 'f0'))
+            fs = get_sampling_rate(signals[ii], inds[ii])
+            t = np.arange(0,signals.shape[1])/fs
+            t = t.reshape((-1,1))
+            lpf = Signal.firwin(constant.FIRORDER, fc/(fs/2))
+            twoDsignal = reduce_dim(signals[ii])*np.exp(-1j*2*np.pi*fc*t)
+            assert twoDsignal.ndim == 2
+            assert lpf.ndim ==1
+            twoDsignal = np.apply_along_axis(Signal.convolve, 0, twoDsignal, lpf, 'same')
+            if signals.ndim == 4:
+                # RF data [N,H,W,C]
+                bbsignal[ii] = twoDsignal.reshape(signals.shape[1:-1] + (1,))
+            else:
+                bbsignal[ii] = twoDsignal
+            if ii%10 == 0:
+                print(f'Baseband demodulating ... >> {ii}/{len(signals)}')
+        return bbsignal
+            
+        
         
 def split_complex(x):
     '''
@@ -336,6 +401,10 @@ def lowbeamspacing(signal, factor, direction='lateral'):
             output size = [10,257,257,2]
             
     '''
+    if factor == 1:
+        return signal
+    elif not isinstance(factor, int):
+        raise TypeError("factor only allows int data type")
     dsignal = downsampling(signal, factor, direction) # downsampling signal
     usignal = np.zeros_like(signal) # upsampling signal
     if signal.ndim == 4:
