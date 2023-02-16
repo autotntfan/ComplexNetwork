@@ -16,11 +16,11 @@ if __name__ == '__main__':
     addpath = os.path.join(*addpath)
     if addpath not in sys.path:
         sys.path.append(addpath)
-    from baseband.utils.data_utils import precheck_dim
+    from baseband.utils import data_utils
     from baseband.setting import constant
     sys.path.remove(addpath)
 else:
-    from .data_utils import precheck_dim
+    from . import data_utils
     from ..setting import constant
 import numpy as np
 from scipy    import io
@@ -79,12 +79,12 @@ def get_data(ind, key):
         file_name: string, file name of the i-th simulation data
         
     '''
-    file_name = get_filename(ind)
-    file_path = os.path.join(constant.DATAPATH, file_name)
-    data = io.loadmat(file_path) # reading file gets information
     if not isinstance(key, str):
         raise TypeError(f"Key word must be a string type")
     else:
+        file_name = get_filename(ind)
+        file_path = os.path.join(constant.DATAPATH, file_name)
+        data = io.loadmat(file_path) # reading file gets information
         return data.get(key)
 
 def get_axis(img, ind):
@@ -98,7 +98,7 @@ def get_axis(img, ind):
         Returns:
             image axis if fs is false, otherwise the sampling rate.
     '''
-    img = precheck_dim(img)
+    img = data_utils.precheck_dim(img)
     H, W = img.shape[1:-1]
     dx = get_data(ind, 'dx') * (constant.DATASIZE[2]/W)
     dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/H)
@@ -120,7 +120,7 @@ def get_sampling_rate(img, ind):
         floating scalar, sampling rate
         
     '''
-    img = precheck_dim(img)
+    img = data_utils.precheck_dim(img)
     H = img.shape[1]
     dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/H)
     return 1/(2*dz/constant.SOUNDV).reshape([-1])
