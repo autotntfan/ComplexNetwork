@@ -21,17 +21,17 @@ if __name__ == '__main__':
         sys.path.append(addpath)
     from baseband.setting import constant
     from baseband.utils.data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
-    from baseband.utils.info import get_axis, get_level, get_sampling_rate, get_delaycurve
+    from baseband.utils.info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
     from baseband.utils.analysis import complex_diff, phase_diff, BPD, IOU, err_statistic
     sys.path.remove(addpath)
 else:
     from ..setting import constant
     from .data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
-    from .info import get_axis, get_level, get_sampling_rate, get_delaycurve
+    from .info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
     from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic
 
 # ------------------------- basic figure -------------------------
-def save_fig(model_name=None, saved_name=None, saved_dir=None):
+def save_fig(model_name=None, saved_name=None, saved_dir=None, fig=None):
     '''
     save figure to specific path
     Args:
@@ -39,6 +39,7 @@ def save_fig(model_name=None, saved_name=None, saved_dir=None):
         model_name: model path
         saved_name: saved figure name
         saved_dir: desired directory will be built if it does not exist
+        fig: saved figure
         
     '''
     if model_name and saved_name: 
@@ -54,9 +55,12 @@ def save_fig(model_name=None, saved_name=None, saved_dir=None):
                 except FileNotFoundError:
                     os.makedirs(path) # make parent directory
             name = os.path.join(path, saved_name + '.png')
-        plt.savefig(name, dpi=300)
+        if fig:
+            fig.savefig(name, dpi=300)
+        else:
+            plt.savefig(name, dpi=300)
         
-def gray(img, DR=60, gain=None, axis=None, title_name=None, *args, **kwargs):
+def gray(img, DR=60, gain=None, axis=None, title_name=None, show=True, *args, **kwargs):
     '''
     Show grayscale image. The default displayed range of color bar under 0. e.g. color range [-60,0] 
     whose dynamic range is 60 and gain is 0. Otherwise, the displayed range of color bar is [gain-DR, gain].
@@ -84,9 +88,10 @@ def gray(img, DR=60, gain=None, axis=None, title_name=None, *args, **kwargs):
         plt.title(title_name)
     plt.colorbar()
     save_fig(*args, **kwargs)
-    plt.show()
+    plt.show() if show else plt.close()
 
-def heatmap(img, axis=None, title_name=None, *args, **kwargs):
+
+def heatmap(img, axis=None, title_name=None, show=True, *args, **kwargs):
     '''
     Show heatmap image.
         Args:
@@ -111,11 +116,11 @@ def heatmap(img, axis=None, title_name=None, *args, **kwargs):
         sns.heatmap(img, cmap='hot')
     if title_name is not None:
         plt.title(title_name)
-    
     save_fig(*args, **kwargs)
-    plt.show()
+    plt.show() if show else plt.close()
 
-def boxplot(data, xlabel, ylabel, hue=None, title_name=None, *args, **kwargs):
+
+def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, *args, **kwargs):
     '''
     Show box plot.
         Args:
@@ -136,9 +141,18 @@ def boxplot(data, xlabel, ylabel, hue=None, title_name=None, *args, **kwargs):
     if title_name is not None:
         plt.title(title_name)
     save_fig(*args, **kwargs)
-    plt.show()
+    plt.show() if show else plt.close()
 
-def envelope_fig(img, DR=60, gain=0, title_name='Bmode', ind=None, saved_name='Bmode', *args, **kwargs):
+
+def envelope_fig(img, 
+                 DR=60, 
+                 gain=0, 
+                 title_name='Bmode', 
+                 ind=None, 
+                 saved_name='Bmode',
+                 show=True,
+                 *args, 
+                 **kwargs):
     '''
     Show the B-mode image in grayscale.
         Args:
@@ -159,9 +173,9 @@ def envelope_fig(img, DR=60, gain=0, title_name='Bmode', ind=None, saved_name='B
         title_name = title_name + '_L' + str(level)
     img = envelope_detection(img, gain)
     img = reduce_dim(img)
-    gray(img, DR, gain, axis, title_name, *args, saved_name=saved_name, **kwargs)
+    gray(img, DR, gain, axis, title_name, show, *args, saved_name=saved_name, **kwargs)
     
-def fft_fig(signal, ind, Aline=False, saved_name='Spectrum', model_name=None):
+def fft_fig(signal, ind, Aline=False, saved_name='Spectrum', model_name=None, show=True):
     '''
     Show FFT.
         Args:
@@ -185,37 +199,38 @@ def fft_fig(signal, ind, Aline=False, saved_name='Spectrum', model_name=None):
     plt.xlabel('MHz')
     plt.title('Spectrum')
     save_fig(model_name,saved_name)
-    plt.show()
+    plt.show() if show else plt.close()
+
     
     
-def angle_fig(signal, ind=None, *args, **kwargs):
+def angle_fig(signal, ind=None, show=True, *args, **kwargs):
     '''
     Show phase distribution.
     '''
     ang = reduce_dim(angle(signal))
     axis = None if ind is None else get_axis(signal, ind)
-    heatmap(ang.astype(np.float32), axis, 'Angle distribution', saved_name='phase', *args, **kwargs)
+    heatmap(ang.astype(np.float32), axis, 'Angle distribution', saved_name='phase', show=show, *args, **kwargs)
    
-def complex_distribution_fig(signal, ind=None, title_name='', model_name=None):
+def complex_distribution_fig(signal, ind=None, title_name='', model_name=None, show=True):
     '''
     Show real- and imaginary-part distribution.
     '''
     axis = None if ind is None else get_axis(signal, ind)
     real, imag = split_complex(normalization(signal))
-    heatmap(real, axis, 'Real part distribution of ' + title_name, model_name, 'realdistritbution_' + title_name)
-    heatmap(imag, axis, 'Imag part distribution of ' + title_name, model_name, 'imagdistritbution_' + title_name)
+    heatmap(real, axis, 'Real part distribution of ' + title_name, model_name, 'realdistritbution_' + title_name, show)
+    heatmap(imag, axis, 'Imag part distribution of ' + title_name, model_name, 'imagdistritbution_' + title_name, show)
 
-def complex_diff_fig(img1, img2, ind=None, title_name='', model_name=None, saved_name='', *args, **kwargs):
+def complex_diff_fig(img1, img2, ind=None, title_name='', model_name=None, saved_name='', show=True):
     '''
     Show real- and imaginary-part difference.
     '''
     assert img1.shape == img2.shape
     axis = None if ind is None else get_axis(img1, ind)
     err_real, err_imag = complex_diff(img1, img2)
-    heatmap(err_real, axis, 'Real diff ' + str(title_name), model_name, 'realpartdiff_' + saved_name, *args, **kwargs)
-    heatmap(err_imag, axis, 'Imag diff ' + str(title_name), model_name, 'imagpartdiff_' + saved_name, *args, **kwargs)
+    heatmap(err_real, axis, 'Real diff ' + str(title_name), model_name, 'realpartdiff_' + saved_name, show)
+    heatmap(err_imag, axis, 'Imag diff ' + str(title_name), model_name, 'imagpartdiff_' + saved_name, show)
     
-def phase_diff_fig(img1, img2, ind=None, title_name='Angle difference', threshold=None, model_name=None):
+def phase_diff_fig(img1, img2, ind=None, title_name='Angle difference', threshold=None, model_name=None, show=True):
     '''
     Show pahse difference.
     '''
@@ -223,11 +238,11 @@ def phase_diff_fig(img1, img2, ind=None, title_name='Angle difference', threshol
     axis = None if ind is None else get_axis(img1, ind)
     angle_err = reduce_dim(phase_diff(img1, img2))
     if threshold is None:
-        heatmap(angle_err, axis, title_name, model_name, 'phasediff')
+        heatmap(angle_err, axis, title_name, model_name, 'phasediff', show)
     else:
-        heatmap((angle_err<threshold).astype(np.float32), axis, 'Binary ' + title_name, model_name, 'binaryphasediff')
+        heatmap((angle_err<threshold).astype(np.float32), axis, 'Binary ' + title_name, model_name, 'binaryphasediff', show)
         
-def project_fig(signal, ref=None, gain=0, direction='lateral', focus=True, *args, **kwargs):
+def project_fig(signal, ref=None, gain=0, direction='lateral', focus=True, show=True, *args, **kwargs):
     '''
     Lateral or axial projection.
     '''
@@ -248,9 +263,10 @@ def project_fig(signal, ref=None, gain=0, direction='lateral', focus=True, *args
     else:
         raise ValueError('Direction must be lateral or axial')
     save_fig(*args, **kwargs)
-    plt.show()
+    plt.show() if show else plt.close()
+
     
-def delay_fig(delay, title_name='Delay curve', *args, **kwargs):
+def delay_fig(delay, title_name='Delay curve', show=True, *args, **kwargs):
     plt.figure()
     plt.plot(delay)
     plt.xlabel('Element')
@@ -258,6 +274,7 @@ def delay_fig(delay, title_name='Delay curve', *args, **kwargs):
     plt.title(title_name)
     plt.ylim((-0.5,0.5))
     save_fig(*args, **kwargs)
+    plt.show() if show else plt.close()
 
 # ------------------------- displayed according to phase aberration level -------------------------
 def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
@@ -317,17 +334,49 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         err = pd.DataFrame(err)
         err_2channel = pd.DataFrame(err_2channel)
         # complex-valued error summation
-        boxplot(err, 'level', 'sumerr', title_name='Error summation', model_name=model_name, saved_name='complexerrorboxplot')
+        boxplot(err, 
+                'level', 
+                'sumerr', 
+                title_name='Error summation', 
+                model_name=model_name, 
+                saved_name='complexerrorboxplot')
         # complex-valued max error
-        boxplot(err, 'level', 'maxerr', title_name='Max error', model_name=model_name, saved_name='complexmaxerrorboxplot')
+        boxplot(err, 
+                'level', 
+                'maxerr', 
+                title_name='Max error', 
+                model_name=model_name, 
+                saved_name='complexmaxerrorboxplot')
         # 2-branch error summation
-        boxplot(err_2channel, 'level', 'sumerr', 'channel', title_name='2-branch error summation', model_name=model_name, saved_name='2Berrorboxplot')
+        boxplot(err_2channel, 
+                'level', 
+                'sumerr', 
+                'channel', 
+                title_name='2-branch error summation', 
+                model_name=model_name, 
+                saved_name='2Berrorboxplot')
         # 2-branch max error
-        boxplot(err_2channel, 'level', 'maxerr', 'channel', title_name='2-branch max error', model_name=model_name, saved_name='2Bmaxerrorboxplot')
+        boxplot(err_2channel, 
+                'level', 
+                'maxerr', 
+                'channel', 
+                title_name='2-branch max error', 
+                model_name=model_name, 
+                saved_name='2Bmaxerrorboxplot')
         # lateral projection error
-        boxplot(err, 'level', 'LBPD', title_name='LBPD', model_name=model_name, saved_name='LBPDboxplot')
+        boxplot(err, 
+                'level', 
+                'LBPD',
+                title_name='LBPD', 
+                model_name=model_name, 
+                saved_name='LBPDboxplot')
         # Axial projection error
-        boxplot(err, 'level', 'ABPD', title_name='ABPD', model_name=model_name, saved_name='ABPDboxplot')
+        boxplot(err, 
+                'level', 
+                'ABPD', 
+                title_name='ABPD', 
+                model_name=model_name, 
+                saved_name='ABPDboxplot')
 
 def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs):
     '''
@@ -394,33 +443,26 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
     BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
     colors = ['red','green','blue','black']
     labels = ['level1','level2','level3','level4']
+    f1 = plt.figure(1)
+    ax1 = f1.add_subplot(111)
+    f2 = plt.figure(2)
+    ax2 = f2.add_subplot(111)
     for level in range(1,5):
-        sortind = np.argsort(BPDs[levels==level])
-        Ldelay = delay[sortind] # level-n delay
-        Lproj_pred = proj_pred[sortind] # level-n predicted projection
-        Lproj_ref = proj_ref[sortind] # level-n reference projection
-        LBPDs = BPDs[sortind] # level-n BPD
-        Linds = inds[sortind] # level-n index
-        Lpred = pred[sortind] # level-n prediction
-        Lref = ref[sortind] # level-n reference
-        Ldelay = delay[sortind] # level-n delay curve
-        
-        plt.figure(1)
-        plt.plot(np.mean(Lproj_pred,axis=0), color=colors[level-1],label=labels[level-1])
-        plt.title('Prediction')
-        plt.legend()
-        save_fig(model_name,'avgLBPDprediction')
-        plt.close()
-        plt.figure(2)
-        plt.plot(np.mean(Lproj_ref,axis=0), color=colors[level-1],label=labels[level-1])
-        plt.title('Ground truth')
-        plt.legend()
-        save_fig(model_name,'avgLBPDreference')
-        plt.close()
+        sortinds = np.argsort(BPDs[levels==level]) # sort BPDs of level-n
+        Linds = inds[levels==level][sortinds] # level-n index
+        Ldelay = delay[levels==level][sortinds] # level-n delay
+        Lproj_pred = proj_pred[levels==level][sortinds] # level-n predicted projection
+        Lproj_ref = proj_ref[levels==level][sortinds] # level-n reference projection
+        LBPDs = BPDs[levels==level][sortinds] # level-n BPD
+        Lpred = pred[levels==level][sortinds] # level-n prediction
+        Lref = ref[levels==level][sortinds] # level-n reference
+        Ldelay = delay[levels==level][sortinds] # level-n delay curve
+        ax1.plot(np.mean(Lproj_pred,axis=0), color=colors[level-1],label=labels[level-1])
+        ax2.plot(np.mean(Lproj_ref,axis=0), color=colors[level-1],label=labels[level-1])
         
         for ii in range(np.size(LBPDs)):
             dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
-            saved_name = 'L' + str(level) + '_i' + str(Linds[ii]) # saved name e.g. L4_i129
+            saved_name = 'L' + str(level) + '_i' + str(Linds[ii]) + '_rank' + str(ii) # saved name e.g. L4_i129
             plt.figure()
             plt.plot(Lproj_pred[ii], label='Prediction')
             plt.plot(Lproj_ref[ii], linestyle='dashed',label='Ground truth')
@@ -428,11 +470,27 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
             plt.legend()
             save_fig(model_name, saved_name + 'proj', dir_)
             plt.close()
-            envelope_fig(Lpred[ii], title_name='Prediction Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Prediction_Bmode',saved_dir=dir_)
-            envelope_fig(Lref[ii], title_name='Ground truth Bmode_i' + str(Linds[ii]), ind=Linds[ii], model_name=model_name, saved_name=saved_name+'_Groundtruth_Bmode', saved_dir=dir_)
-            delay_fig(Ldelay[ii], title_name='Delay curve_i' + str(Linds[ii]), model_name=model_name, saved_name=saved_name+'delay', saved_dir=dir_)
-            if ii%10 == 0:
-                print(f'Now plotting IOU .... >> {ii}/{np.size(LBPDs)}')
+            envelope_fig(Lpred[ii], 
+                         title_name='Prediction Bmode_i' + str(Linds[ii]), 
+                         ind=Linds[ii], 
+                         model_name=model_name, 
+                         saved_name=saved_name+'_Prediction_Bmode',
+                         saved_dir=dir_,
+                         show=False)
+            envelope_fig(Lref[ii], 
+                         title_name='Ground truth Bmode_i' + str(Linds[ii]), 
+                         ind=Linds[ii], 
+                         model_name=model_name, 
+                         saved_name=saved_name+'_Groundtruth_Bmode', 
+                         saved_dir=dir_,
+                         show=False)
+            delay_fig(Ldelay[ii], 
+                      title_name='Delay curve_i' + str(Linds[ii]), 
+                      model_name=model_name, 
+                      saved_name=saved_name+'delay', 
+                      saved_dir=dir_,
+                      show=False)
+            progressbar(ii+1, np.size(LBPDs), f'Saving level-{level}')
         # draw PR25, PR50, PR75, PR99 projection of prediction and reference
         plt.figure()
         plt.plot(np.mean(Lproj_pred[:ii//4],axis=0), label='0.25p', color='green')
@@ -445,7 +503,20 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
         plt.plot(np.mean(Lproj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
         plt.legend()
         save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
-        plt.show()
+        plt.close()
+    # draw and save figure 1 and figure 2
+    ax1.set_title('Prediction')
+    ax1.set_xlabel('Lateral position (mm)')
+    ax1.set_ylabel('Depth (mm)')
+    ax1.legend()
+    save_fig(model_name, 'avgLBPDprediction', fig=f1)
+    plt.close(1)
+    ax2.set_title('Ground truth')
+    ax2.set_xlabel('Lateral position (mm)')
+    ax2.set_ylabel('Depth (mm)')
+    ax2.legend()
+    save_fig(model_name, 'avgLBPDreference', fig=f2)
+    plt.close(2)
 
 def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
     '''
@@ -480,10 +551,10 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
         envelope_ref = reduce_dim(envelope_detection(signal2[ii], gain))
         plt.figure(figsize=(20,20))
         plt.subplot(5,2,1)
-        plt.imshow(envelope_pred, cmap='gray', vmin=gain-DR, vmax=gain,aspect='auto')
+        plt.imshow(envelope_pred, cmap='gray', vmin=gain-DR, vmax=gain, aspect='auto')
         plt.title('Prediction')
         plt.subplot(5,2,2)
-        plt.imshow(envelope_ref, cmap='gray', vmin=gain-DR, vmax=gain,aspect='auto')
+        plt.imshow(envelope_ref, cmap='gray', vmin=gain-DR, vmax=gain, aspect='auto')
         plt.title('Ground truth')
         for iDR in range(len(DRs)):
             plt.subplot(5,2,3+2*iDR)
@@ -494,8 +565,7 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             plt.title(title_names[iDR] + str(iou[iDR,ii]))
         save_fig(model_name, 'IOU_L' + str(levels[ii]) + '_i' + str(inds[ii]), 'IOU')
         plt.close()
-        if ii%10 == 0:
-            print(f'Now plotting IOU .... >> {ii}/{iou.shape[1]}')
+        progressbar(ii+1, iou.shape[1], 'Drawing IOU')
     # draw iou distribution for the whole dataset in a sequence of phase aberration level.
     start = 0
     for level in range(1,5):
