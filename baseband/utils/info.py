@@ -217,6 +217,18 @@ def save_model(model, history, name):
         plt.ylabel('loss')
         plt.savefig(os.path.join(saved_dir,name+'.png'))
         plt.show()
+
+def progressbar(count, total, name):
+    totalbar = 20
+    ratio = count/total*100
+    now = int((count/total)*totalbar)*'█'
+    rest = (totalbar - int((count/total)*totalbar))*'.'
+    print(f"\r{name} : [{now}{rest}] {ratio:.2f}% {count}/{total}", end='')
+    if ratio == 100:
+        print('\n')
+    elif ratio >= 100:
+        print('')
+        
     
 
 
