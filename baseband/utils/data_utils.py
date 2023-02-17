@@ -39,9 +39,9 @@ def convert_to_complex(inputs):
         
         input = 2-channel real type BB data, output = complex type BB data (a+bi)
         
-        input = complex type BB data, output = complex type BB data
+        input = complex type BB data, output = complex type BB data (a+bi)
     '''
-    if np.iscomplex(inputs).any():
+    if np.iscomplex(inputs).all():
         return inputs
     shape = inputs.shape
     rank = inputs.ndim
@@ -62,6 +62,40 @@ def convert_to_complex(inputs):
         else:
             real, imag = split_complex(inputs)
             return real + 1j*imag
+    else:
+        raise ValueError(f'Unrecognized complex array with shape {shape}')
+        
+
+def convert_to_real(inputs):
+    '''
+    Convert complex data type input to 2-channel real type array. If input is real data type, this
+    function returns intput itself.
+        Args:
+            inputs: Numpy array, real-valued or complex-type.
+        Return:
+            real-valued array with the same dimension of inputs.
+        
+    Example:
+        input = RF data, output = real type RF data
+        
+        input = complex-valued data, output = 2-channel real type BB data
+        
+        input = 2-channel real type BB data, output = 2-channel real type BB data
+    '''
+    if np.isreal(inputs).all():
+        return inputs
+    shape = inputs.shape
+    rank = inputs.ndim
+    if rank == 2:
+        # complex dtype [H,W] -> [H,W,2] real dtype
+        real, imag = split_complex(inputs)
+        real = np.expand_dims(real, axis=-1)
+        imag = np.expand_dims(imag, axis=-1)
+        return np.concatenate((real,imag),axis=-1)
+    elif rank in {3,4}:
+        # complex dtype only allow [H,W,C]
+        real, imag = split_complex(inputs)
+        return np.concatenate((real,imag),axis=-1)
     else:
         raise ValueError(f'Unrecognized complex array with shape {shape}')
         
