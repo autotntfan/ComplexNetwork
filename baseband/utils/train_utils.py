@@ -7,14 +7,22 @@ Created on Wed Mar 16 21:13:56 2022
 import complexnn
 import os
 import time
-import constant
 import numpy             as np
 import tensorflow        as tf
 import matplotlib.pyplot as plt
-
-DIR_SAVED      = constant.DIR_SAVEMODEL
-DIR_SIMULATION = constant.DIR_SIMDATA
-DATA_SIZE      = constant.DATA_SIZE
+if __name__ == '__main__':
+    import sys
+    import pathlib
+    currentpath = os.getcwd()
+    path = pathlib.Path(currentpath).parts
+    addpath = path[:-2]
+    addpath = os.path.join(*addpath)
+    if addpath not in sys.path:
+        sys.path.append(addpath)
+    from baseband.setting import constant
+    sys.path.remove(addpath)
+else:
+    from ..setting import constant
 
 def get_custom_object():
     '''
@@ -37,7 +45,7 @@ def read_info(model_name):
      This function is used to check whether the given
      augments are compatible with the loaded model, i.e. model_name.
     '''
-    saved_dir = os.path.join(DIR_SAVED, model_name)
+    saved_dir = os.path.join(constant.DIR_SAVEMODEL, model_name)
     file_name = model_name + '_parameters.txt'
     if not os.path.exists(saved_dir):
         raise FileNotFoundError('file does not exist')
@@ -54,14 +62,14 @@ def save_info(model_name, saved_var):
         model_name: saved path
         saved_var: parameters to be preserved
     '''
-    saved_dir = os.path.join(DIR_SAVED, model_name) # DIR_SAVED/model_name/..
+    saved_dir = os.path.join(constant.DIR_SAVEMODEL, model_name) # constant.DIR_SAVEMODEL/model_name/..
     file_name = model_name + '_parameters.txt' 
     if not os.path.exists(saved_dir):
         try:
             os.mkdir(saved_dir)
         except FileNotFoundError:
             os.makedirs(saved_dir)
-    saved_path = os.path.join(saved_dir, file_name) # DIR_SAVED/model_name/file_name
+    saved_path = os.path.join(saved_dir, file_name) # constant.DIR_SAVEMODEL/model_name/file_name
     with open(saved_path, 'w') as f:
         f.write(str(saved_var))
     
@@ -75,7 +83,7 @@ def save_model(model, history, name):
         history: training loss
         name: model name consists of date and some parameter information
     '''
-    saved_dir = os.path.join(DIR_SAVED, name)
+    saved_dir = os.path.join(constant.DIR_SAVEMODEL, name)
     if not os.path.exists(saved_dir):
         try:
             os.mkdir(saved_dir)
