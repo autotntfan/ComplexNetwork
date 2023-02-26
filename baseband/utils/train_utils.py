@@ -12,11 +12,8 @@ import tensorflow        as tf
 import matplotlib.pyplot as plt
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
