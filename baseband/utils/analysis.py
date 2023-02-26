@@ -8,11 +8,8 @@ import numpy as np
 import os
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.utils.data_utils import angle, projection, envelope_detection, split_complex, normalization
@@ -25,7 +22,7 @@ else:
     from ..setting import constant
     
 import tensorflow as tf
-
+import pandas as pd
 # ------------------------- Metrics -------------------------
 def complex_diff(signal1, signal2, normalize=True):
     '''
@@ -267,6 +264,30 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         'ind':inds
         }
     return err, err_2channel, delay
+
+def iou_ratio(pred, ref, levels, threshold=0.5):
+    if threshold > 1 or threshold < 0:
+        raise ValueError(f"Threshold must be in the range of [0,1] but given {threshold}")
+    # --------
+    gain = 0
+    DR = 60
+    gap = 20
+    # --------
+    iou, DRs, _, _ = IOU(pred, ref, DR, gain, gap)
+    iou_larger_than_half_count = np.zeros((len(DRs), 4))
+    iou_larger_than_half_ratio = np.zeros((len(DRs), 5))
+    for level in range(1,5):
+        # phase aberration level
+        level_n_iou = iou[:,levels==level]
+        for iDR in range(iou.shape[0]):
+            iou_larger_than_half_count[iDR,level-1] = len(list(filter(lambda x: x > threshold, level_n_iou[iDR])))
+            iou_larger_than_half_ratio[iDR,level-1] = iou_larger_than_half_count[iDR,level-1]/len(level_n_iou[iDR])
+    iou_larger_than_half_ratio[:,-1] = np.sum(iou_larger_than_half_count, axis=-1)/pred.shape[0]
+    df = pd.DataFrame(np.round(iou_larger_than_half_ratio*100,2), 
+                      columns=["level-1", "level-2", "level-3", "level-4", "Total"],
+                      index=['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB'])
+    print(df)
+    
 
 
 
