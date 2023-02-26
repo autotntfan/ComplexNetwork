@@ -12,11 +12,8 @@ import pandas as pd
 import os
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
@@ -576,7 +573,7 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             # DR interval
             plt.figure(iDR+1)
             # draw iou distribution under this aberration level for different regions
-            plt.scatter(np.arange(start,end),level_n_iou[iDR,:],c=colors[level-1])
+            plt.scatter(np.arange(start,end),level_n_iou[iDR],c=colors[level-1])
             plt.title(title_names[iDR])
             plt.xlabel('Sample')
             plt.ylabel('IOU scores')
@@ -586,18 +583,3 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
     plt.show()
 
 
-
-# def multilevel_projection_m(pred, truth, OBJ):
-#     pred = focusing(pred)
-#     truth = focusing(truth)
-#     proj_pred = projection(pred, 0)
-#     proj_true = projection(truth, 0)
-#     levels = np.zeros(pred.shape[0], int)
-#     pred_proj = np.zeros((4,pred.shape[2]))
-#     true_proj = np.zeros((4,pred.shape[2]))
-#     for i in range(pred.shape[0]):
-#         levels[i], _ = OBJ.find_level(i, train=False)
-#     for i in range(1,5):
-#         pred_proj[i-1,:] = np.mean(proj_pred[levels==i],axis=0)
-#         true_proj[i-1,:] = np.mean(proj_true[levels==i],axis=0)
-#     return pred_proj,true_proj
