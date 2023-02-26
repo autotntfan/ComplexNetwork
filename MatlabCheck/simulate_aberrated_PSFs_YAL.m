@@ -6,10 +6,8 @@ if ~exist(savepath, 'dir')
     mkdir(savepath)
 end
 % --------- parameters ---------
-% total # of psf = Npsf*Npt*4
-Npsfset     = 10;                   % number of simulated PSF set
-Nptperset   = 5;                    % number of simulated PSFs for one set
-rngseed     = 7414:7414+Npsfset-1;  % random number generator seed
+Npt         = 5;                    % number of simulated PSFs for one set
+rngseed     = 7414;                 % random number generator seed
 Npx         = 257;                  % final RF/baseband data size after resize for x direction
 Npz         = 257;                  % final RF/baseband data size after resize for z direction
 fs          = 100e6;                % sampling rate 100 MHz
@@ -27,21 +25,16 @@ DR          = 60;                   % dynamic range
 psfsegx     = 32/2;                 % x-direction segmentation size, 16 lambda for left and right side from central point
 psfsegz     = 16/2;                 % z-direction segmentation size, 8 lambda for top and bottom side from central point
 
-tic
-for ii = 1:Npsfset
-close all
-rng(rngseed(ii))
-fprintf('Now generating... %d psf\n', ii)
+rng(rngseed)
 
 % --------- parameters ---------
 f0     = (3 + 4.5*rand(1))*1e6; % center freq. 3~7.5 MHz
 bw     = 0.5 + 0.3*rand(1);     % fractional bandwidth
 lambda = soundv/f0;             % = [205.3,513.3] [um]
 dz0    = soundv/fs/2;           % original depth (time) interval, i.e. dz, 2dz/soundv=1/fs
-% lambda = soundv/f0; dz = soundv/2fs ;
-% 1 lambda (convert length to # of pixel) = 2*fs/f0 samples = 2pi (phase delay);
-% 0.5 lambda = fs/f0 samples.
-halflambda_in_sample = fs/f0;   % lambda length represented in sample. [13.333 33.3333]
+% lambda = soundv/f0; dt = lambda/soundv = 1/f0 (one-way wavelength);
+% convert length to # of pixels　?　1/f0*fs = fs/f0
+lambda_in_sample = fs/f0;   % lambda length represented in sample. [13.333 33.3333]
 % ------ delay profile ------
 % the phase aberration profile follows the near field phase screen model
 % and assumes its correlation length to be 5mm.
@@ -81,10 +74,10 @@ xdc_excitation(Th, excitation);
 ptloc      = 1/1e3;          % first point location: 1 mm
 ptinterval = 9/1e3;          % adjacent point interval: 9 mm
 shiftrange = ptinterval/3;   % 3 mm
-positions  = zeros(2+Nptperset,3);
+positions  = zeros(2+Npt,3);
 positions(1,3) = ptloc;
 % positions  = [0 0 1;0 0 10;0 0 19;0 0 28;0 0 37;0 0 46;0 0 55]/1e3; % first position determines Noffset.
-for ipt = 1:Nptperset+1
+for ipt = 1:Npt+1
     positions(1+ipt,3) = ptloc + ipt*ptinterval;
 end
 zshift = 2*shiftrange*rand(1) - shiftrange; % randomly and simultaneously shift point source depth in the range [-3,3]
@@ -137,7 +130,7 @@ maxdelay = [0, 1, 1.5, 2]/4; % (*pi)
 
 for k = 1:4
     aberratedchanneldata  = zeros(Nsample+1,Nelements,Nelements);
-    delay_curve_in_sample = round(delay_curve * maxdelay(k) * halflambda_in_sample); % delay how many samples
+    delay_curve_in_sample = round(delay_curve * maxdelay(k) * lambda_in_sample); % delay how many samples
     for itx = 1:Nelements 
         % full_dataset(:, :, itx): one channel data, obtained by the itx-th transmitting element and all received Nelements.
         % delay_curve1(itx): delay applied to only one tx element
@@ -198,9 +191,9 @@ for k = 1:4
         lpf = fir1(48, f0/(newfs/2))';
         
         psf_rf = RFdata(z_pt_start_ind:z_pt_end_ind,x_pt_start_ind:x_pt_end_ind);
-        psf_rf = imresize(psf_rf, [Npz,Npx]);
-%         psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(0:size(psf_rf,1)-1)'./newfs), lpf, 'same');
-        psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
+        psf_rf = imresize(psf_rf, [Npz,Npx], 'bilinear');
+        psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(0:size(psf_rf,1)-1)'./newfs), lpf, 'same');
+%         psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
         envelope = abs(psf_bb);
         envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
         fig = figure('visible','off');
@@ -213,8 +206,8 @@ for k = 1:4
 
         % produce speckle
         speckle_rf = conv2(scat_space, psf_rf, 'same'); % psf is a filter
-%         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
-        speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
+        speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
+%         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
         envelope = abs(speckle_bb);
         envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
 
@@ -226,13 +219,10 @@ for k = 1:4
         axis image;
 
 
-        save(fullfile(savepath,['Data_', num2str(Nptperset*(ii-1)+(ipt-1)), '_delay_', num2str(k) '.mat']), 'psf_rf', 'psf_bb', 'speckle_rf', 'speckle_bb', 'dx', 'dz', 'depth', 'f0', 'k', 'bw', 'delay_curve');
-        saveas(fig, fullfile(savepath,['Data_', num2str(Nptperset*(ii-1)+(ipt-1)), '_delay_', num2str(k), '.png']));
+        save(fullfile(savepath,['Data_', num2str(ipt), '_delay_', num2str(k) '.mat']), 'psf_rf', 'psf_bb', 'speckle_rf', 'speckle_bb', 'dx', 'dz', 'depth', 'f0', 'k', 'bw', 'delay_curve');
+        saveas(fig, fullfile(savepath,['Data_', num2str(ipt), '_delay_', num2str(k), '.png']));
 
     end
-    break
 end
-break
-end
-toc
+
 
