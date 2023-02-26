@@ -7,19 +7,18 @@ Created on Sun Mar 20 18:31:41 2022
 import os
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
-    from baseband.utils.data_utils import normalization, downsampling    
+    from baseband.utils.data_utils import normalization, downsampling
+    from baseband.utils.info import progressbar, save_info, read_info
     sys.path.remove(addpath)
 else:
     from ..setting import constant
     from ..utils.data_utils import normalization, downsampling 
+    from ..utils.info import progressbar, save_info, read_info
 import numpy as np
 from scipy import io
 
@@ -64,12 +63,9 @@ class DataPreprocessing():
         speckle_rf = np.zeros(constant.DATASIZE)
         count = 0
         # read psf and speckle in sequence
-        print('Loading ... \n')
         for name in file_name:
             if name.endswith('.mat'):
                 count = count + 1
-                if count%100 == 0:
-                    print(f'Now processing ... >> {count}/{constant.DATASIZE[0]} \n')
                 # split the i-th level-j PSF 
                 ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
                 # convert to index
@@ -80,6 +76,7 @@ class DataPreprocessing():
                 psf_rf[ind,:,:] = data.get('psf_rf')
                 speckle_bb[ind,:,:] = data.get('speckle_bb')
                 speckle_rf[ind,:,:] = data.get('speckle_rf')
+                progressbar(count, constant.DATASIZE[0], 'Loading data')
             else:
                 continue
         # turn complex type array to two-channel real-valued array.
@@ -168,7 +165,7 @@ class GetData(DataPreprocessing):
                  complex_network=True,
                  forward=True,
                  seed=7414,
-                 DIRETORY=constant.CACHEPATH,
+                 DIRECTORY=constant.CACHEPATH,
                  **kwargs):
         super().__init__(**kwargs)
         self.factor = factor # downsampling factor along axial direction
@@ -176,7 +173,7 @@ class GetData(DataPreprocessing):
         self.complex_network = complex_network # use RF or BB model
         self.forward = forward # whether use forward path
         self.seed = seed # random seed
-        self.DIRETORY  = DIRETORY # path of splitted data from the previous class
+        self.DIRECTORY  = DIRECTORY # path of splitted data from the previous class
     
         self.indices = None # indices after random shuffle
         self.dataset = None # a dictionary for training pair
@@ -202,11 +199,12 @@ class GetData(DataPreprocessing):
         y_train, y_test = self.get_data(dtype[1])
 
         if self.forward:   
-            self.dataset['ideal_psf'] = ['ideal_train', 'ideal_test']
-            
+            self.dataset['ideal_psf'] = ['ideal_train', 'ideal_test']   
             ideal_train, ideal_test = self.get_data('ideal_psf')
+            self.info('w')
             return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
         else:
+            self.info('w')
             return (x_train, y_train), (x_test, y_test)
         
     def get_data(self, dtype):
@@ -221,14 +219,20 @@ class GetData(DataPreprocessing):
         numpy.array: 
             training data, testing data
         '''
-        print(f'{dtype} file is creating ...')
-        if dtype in {'ideal_psf'}:
-            if self.complex_network:
-                return self.__slice('psf_bb', ideal=True)
+        try:
+            self.__sanitized()
+            train, test = self.__read_cache(self.dataset[dtype][0]), self.__read_cache(self.dataset[dtype][1])
+            return train, test
+        except (FileNotFoundError,AssertionError):
+            print('Files need to recreate \n')
+            print(f'{dtype} file is creating ... \n')
+            if dtype in {'ideal_psf'}:
+                if self.complex_network:
+                    return self.__slice('psf_bb', ideal=True)
+                else:
+                    return self.__slice('psf_rf', ideal=True)
             else:
-                return self.__slice('psf_rf', ideal=True)
-        else:
-            return self.__slice(dtype)
+                return self.__slice(dtype)
     
     def find_indices(self):
         train_indices = self.indices[:self.num_training]
@@ -259,16 +263,30 @@ class GetData(DataPreprocessing):
             else:
                 return level_of_test[ind], test_indices[ind]
         
-    def info(self):
+    def info(self, op=None):
         '''
         Input arguments setting
         '''
         saved_var = {
             'factor':self.factor,
             'num_training':self.num_training,
-            'seed':self.seed
+            'complex_network':self.complex_network,
+            'forward':self.forward,
+            'seed':self.seed,
+            'DIRECTORY':self.DIRECTORY
             }
-        return saved_var
+        saved_dir = constant.CACHEPATH
+        file_name = 'parameters.txt'
+        
+        if op is None:
+            return saved_var
+        elif op == 'r':
+            return read_info(file_name, saved_dir)
+        elif op == 'w':
+            save_info(saved_var, file_name, saved_dir)
+        else:
+            raise ValueError("Expected 'r', 'w', and NoneType for reading, writing and getting information.")
+            
             
     def __shuffle_data(self):
         '''
@@ -291,7 +309,7 @@ class GetData(DataPreprocessing):
         ideal : boolean, whether ideal PSF is required.
 
         '''
-        path = os.path.join(self.DIRETORY, dtype+'.npy')
+        path = os.path.join(self.DIRECTORY, dtype+'.npy')
         data = self.__load_file(path) # read data
         # decimation
         if self.factor:
@@ -310,12 +328,26 @@ class GetData(DataPreprocessing):
         self.__save_cache(test, self.dataset[dtype][1])
         return train, test
     
+    def __sanitized(self):
+        print('Trying to check files ... \n ')
+        prepar = self.info('r') # previous saved parameters
+        nowpar = self.info() # now parameters
+        for key in prepar.keys():
+            assert prepar[key] == nowpar[key]
+        
+    
     def __save_cache(self, x, name):
         '''
         Save training pairs.
         '''
         assert isinstance(name, str)
-        np.save(os.path.join(self.DIRETORY, name + '.npy'), x)
+        print(f'Saving {name} ... \n')
+        np.save(os.path.join(self.DIRECTORY, name + '.npy'), x)
+    
+    def __read_cache(self, name):
+        assert isinstance(name, str)
+        print(f'Reading {name} ... \n')
+        return np.load(os.path.join(self.DIRECTORY, name + '.npy'))
     
     def __load_file(self, path):
         '''
@@ -331,3 +363,4 @@ class GetData(DataPreprocessing):
             return output_shape + (2,)
         else:
             return output_shape + (1,)
+        
