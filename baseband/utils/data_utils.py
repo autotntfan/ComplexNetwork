@@ -9,19 +9,16 @@ Created on Fri Jul 15 23:28:49 2022
 import os
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
-    from baseband.utils.info import get_sampling_rate, get_data
+    from baseband.utils.info import get_sampling_rate, get_data, progressbar
     sys.path.remove(addpath)
 else:
     from ..setting import constant
-    from .info import get_sampling_rate, get_data
+    from .info import get_sampling_rate, get_data, progressbar
 import scipy.signal      as Signal
 import numpy as np
 import cv2
@@ -156,8 +153,8 @@ def bbdemodulate(signals, inds):
                 bbsignal[ii] = twoDsignal.reshape(signals.shape[1:-1] + (1,))
             else:
                 bbsignal[ii] = twoDsignal
-            if ii%10 == 0:
-                print(f'Baseband demodulating ... >> {ii}/{len(signals)}')
+            progressbar(ii+1, len(signals), f'Baseband demodulating')
+
         return bbsignal
             
         
