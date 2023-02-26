@@ -9,11 +9,8 @@ Created on Thu Jul 14 15:52:53 2022
 import os
 if __name__ == '__main__':
     import sys
-    import pathlib
     currentpath = os.getcwd()
-    path = pathlib.Path(currentpath).parts
-    addpath = path[:-2]
-    addpath = os.path.join(*addpath)
+    addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.utils import data_utils
@@ -154,22 +151,23 @@ def get_default(complex_network=True):
         loss = 'MSE'
     return decimation, size, loss, batch
 
-def read_info(model_name):
+def read_info(saved_name, saved_dir=None):
     '''
      reading the information saved by save_info function
      this function is in order to check whether the given
      augments are compatible with loaded model
     '''
-    saved_dir = os.path.join(constant.MODELPATH, model_name)
-    file_name = model_name + '_parameters.txt'
-    if not os.path.exists(saved_dir):
-        raise FileNotFoundError('file does not exist')
-    saved_path = os.path.join(saved_dir, file_name)
+    if saved_dir is not None:
+        saved_path = os.path.join(saved_dir, saved_name)
+    else:
+        saved_path = saved_name
+    if not os.path.exists(saved_path):
+        raise FileNotFoundError('File does not exist')
     with open(saved_path, 'r') as f:
         content = f.read() # type of content is string
     return eval(content) # convert string to dict
 
-def save_info(model_name, saved_var):
+def save_info(saved_var, saved_name, saved_dir=None):
     '''
     save the information of parameters, included 
     epoch. seed. and so on
@@ -177,14 +175,17 @@ def save_info(model_name, saved_var):
         model_name: saved path
         saved_var: parameters to be preserved
     '''
-    saved_dir = os.path.join(constant.MODELPATH, model_name)
-    file_name = model_name + '_parameters.txt'
-    if not os.path.exists(saved_dir):
-        try:
-            os.mkdir(saved_dir)
-        except FileNotFoundError:
-            os.makedirs(saved_dir)
-    saved_path = os.path.join(saved_dir, file_name)
+    # saved_dir = os.path.join(constant.MODELPATH, model_name)
+    # file_name = model_name + '_parameters.txt'
+    if saved_dir is not None:
+        if not os.path.exists(saved_dir):
+            try:
+                os.mkdir(saved_dir)
+            except FileNotFoundError:
+                os.makedirs(saved_dir)
+        saved_path = os.path.join(saved_dir, saved_name)
+    else:
+        saved_path = saved_name
     with open(saved_path, 'w') as f:
         f.write(str(saved_var))
         
