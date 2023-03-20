@@ -38,7 +38,7 @@ def get_custom_object():
 
 def get_level(ind):
     '''
-    Find its aberration level according to the index.
+    Find their aberration level according to the index.
     ----------
     Arg:
         ind: int,the i-th simulation data.
@@ -46,10 +46,22 @@ def get_level(ind):
         level 
 
     '''
-    if (ind+1)%4 == 0:
-        return 4
-    else:
-        return (ind+1)%4
+    if not isinstance(ind, np.ndarray):
+        ind = np.asarray(ind)
+    ind = ind + 1
+    levels = ind%constant.k
+    try:
+        # if input ind is a sequence
+        levels[levels==0] = constant.k
+        return levels
+    except TypeError:
+        # if input ind only an integer 
+        if levels%constant.k == 0:
+            return constant.k
+        else:
+            return levels%constant.k
+    
+
     
 def get_filename(ind):
     '''
@@ -61,8 +73,16 @@ def get_filename(ind):
         file_name: string, file name of the i-th simulation data
         
     '''
-    level = get_level(ind)
-    file_name = 'Data_' + str(ind//4 + 1) + '_delay_' + str(level) + '.mat'
+    if not isinstance(ind, np.ndarray):
+        ind = np.asarray(ind)
+    if np.size(ind) > 1:
+        # if ind is a sequence
+        file_names = []
+        for ii in range(len(ind)):
+            file_names.append(get_filename(ind[ii]))
+        return file_names
+    levels = get_level(ind)
+    file_name = 'Data_' + str(ind//constant.k + 1) + '_delay_' + str(levels) + '.mat'
     return file_name
 
 def get_data(ind, key):
@@ -77,7 +97,7 @@ def get_data(ind, key):
         
     '''
     if not isinstance(key, str):
-        raise TypeError(f"Key word must be a string type")
+        raise TypeError(f"Key word must be a string type, but get {type(key)}")
     else:
         file_name = get_filename(ind)
         file_path = os.path.join(constant.DATAPATH, file_name)
@@ -124,7 +144,9 @@ def get_sampling_rate(img, ind):
     
 def get_delaycurve(ind):
     '''
-    Find its delay curve.
+    Find its delay curve. Original delay curve is fixed in the range of [-0.5,0.5] pi. This function convert level k to
+    its associated delay unit in pi. For example, k = 4 means its maximum phase error is 4/8 pi. So, we need to convert 
+    [-0.5,0.5] to [-pi/2,pi/2].
     ----------
     Arg:
         ind: int, the i-th simulation data
@@ -132,12 +154,30 @@ def get_delaycurve(ind):
         ndarray, delay curve
     '''
     # obtain delay profile
-    delay = get_data(ind, 'delay_curve')
-    level = get_level(ind)
-    if level != 1:
-        return delay*level/8*2
-    else:
-        return delay*0
+    try:
+        delay = get_data(ind, 'delay_curve')
+        level = get_level(ind)
+        if level != 1:
+            return delay*level/8*2 # unit in pi
+        else:
+            return delay*0
+    except TypeError:
+        return 0
+    
+def get_soundv(ind, real=True):
+    '''
+    Find its true sound speed for filed II setting if real is True. 
+    Otherwise this function returns sound speed for beamformation, 
+    i.e. the wrong sound speed.
+    
+    '''
+    try:
+        if real:
+            return np.squeeze([get_data(ii, 'soundv') for ii in range(len(ind))])
+        else:
+            return constant.SPEEDLIST[get_level(ind) - 1]
+    except TypeError:
+        return int(get_data(ind, 'soundv'))
 
 def get_default(complex_network=True):
     batch = 8
@@ -222,7 +262,7 @@ def save_model(model, history, name):
 def progressbar(count, total, name):
     totalbar = 20
     ratio = count/total*100
-    now = int((count/total)*totalbar)*'█'
+    now = int((count/total)*totalbar)*'>'
     rest = (totalbar - int((count/total)*totalbar))*'.'
     print(f"\r{name} : [{now}{rest}] {ratio:.2f}% {count}/{total}", end='')
     if ratio == 100:
