@@ -159,12 +159,13 @@ def ms_ssim(signal1, signal2, focus=False, envelope=False, filter_size=7):
         }
     return __ssim_core(signal1, signal2, tf.image.ssim_multiscale, **kwargs)
 
-def save_metrics(signal1, signal2, model_name):
-    save_dir = os.path.join(r'./modelinfo', model_name)
+def save_metrics(signal1, signal2, levels, model_name):
+    save_dir = os.path.join(constant.MODELPATH, model_name)
     file_name = os.path.join(save_dir, model_name + '_metrics.txt')
     focus = [False, False, True, True]
     envelope = [False, True, False, True]
     types = ['raw data', 'envelope', 'focus raw data', 'focus envelope']
+    iou_ratio(signal1, signal2, levels)
     with open(file_name,'w') as f:
         for ii in range(4):
             f.write('\n' + types[ii] + ' metrics: \n')
@@ -172,6 +173,7 @@ def save_metrics(signal1, signal2, model_name):
             f.write('mae ' + str(mae(signal1, signal2, focus[ii], envelope[ii])) + '\n')
             f.write('ssim ' + str(ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
             f.write('ms_ssim ' + str(ms_ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
+        f.write("\n Ratios of IOU larger than 0.5 \n" +  str(iou_ratio(signal1, signal2, levels)) + "\n")
             
 def __preprocessing(signal1, signal2, focus=False, envelope=False):
     if focus:
@@ -266,6 +268,15 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
     return err, err_2channel, delay
 
 def iou_ratio(pred, ref, levels, threshold=0.5):
+    '''
+    Calculate the ratio of iou larger than threshold.
+    Args:
+        pred: ndarray with shape [N,H,W,C], prediction.
+        ref: same data type as pred, ground truth.
+        level: [N,], phase aberration levels.
+        threshold: float, iou threshold.
+    '''
+    assert pred.shape == ref.shape
     if threshold > 1 or threshold < 0:
         raise ValueError(f"Threshold must be in the range of [0,1] but given {threshold}")
     # --------
@@ -274,19 +285,27 @@ def iou_ratio(pred, ref, levels, threshold=0.5):
     gap = 20
     # --------
     iou, DRs, _, _ = IOU(pred, ref, DR, gain, gap)
-    iou_larger_than_half_count = np.zeros((len(DRs), 4))
-    iou_larger_than_half_ratio = np.zeros((len(DRs), 5))
-    for level in range(1,5):
+    iou_larger_than_half_count = np.zeros((len(DRs), constant.k)) # the number of iou larger than threshold, shape = [DRs, levels]
+    iou_larger_than_half_ratio = np.zeros((len(DRs), constant.k+1)) # the ratio of iou larger than threshold, shape = [DRs, levels+total]
+    for level in range(1,constant.k+1):
         # phase aberration level
         level_n_iou = iou[:,levels==level]
         for iDR in range(iou.shape[0]):
+            # DR interval
+            # filter which x during the interval is larger than threshold
             iou_larger_than_half_count[iDR,level-1] = len(list(filter(lambda x: x > threshold, level_n_iou[iDR])))
+            # convert to ratio
             iou_larger_than_half_ratio[iDR,level-1] = iou_larger_than_half_count[iDR,level-1]/len(level_n_iou[iDR])
+    # calculate total ratio for each interval
     iou_larger_than_half_ratio[:,-1] = np.sum(iou_larger_than_half_count, axis=-1)/pred.shape[0]
+    column = ['level-'+str(ii+1) for ii in range(constant.k)]
+    column.append('Total')
     df = pd.DataFrame(np.round(iou_larger_than_half_ratio*100,2), 
-                      columns=["level-1", "level-2", "level-3", "level-4", "Total"],
+                      columns=column,
                       index=['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB'])
-    print(df)
+    return df
+
+
     
 
 
