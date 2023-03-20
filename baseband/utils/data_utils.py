@@ -38,7 +38,7 @@ def convert_to_complex(inputs):
         
         input = complex type BB data, output = complex type BB data (a+bi)
     '''
-    if np.iscomplex(inputs).all():
+    if inputs.dtype == np.complex64 or  inputs.dtype == np.complex128:
         return inputs
     shape = inputs.shape
     rank = inputs.ndim
@@ -79,7 +79,7 @@ def convert_to_real(inputs):
         
         input = 2-channel real type BB data, output = 2-channel real type BB data
     '''
-    if np.isreal(inputs).all():
+    if inputs.dtype != np.complex64 and  inputs.dtype != np.complex128:
         return inputs
     shape = inputs.shape
     rank = inputs.ndim
