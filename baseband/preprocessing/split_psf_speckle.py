@@ -26,7 +26,13 @@ class DataPreprocessing():
     '''
         Matlab data files end with .mat are read and normalized to [-1,1]. Finally, RF and BB PSFs and speckles are
         saved in numpy format file with shape [N,H,W,C], where C is 1 for RF data or 2 for BB data.
-
+        
+        Args:
+            loadpath: string, where data saves.
+            savepath: string, where to save data.
+            normalization: boolean, whether to recitify value in the range of [-1,1]
+            k: int, how many kinds of phase aberration. i.e. file name: Data_1_delay_k
+            
         function:
             save_data: main function, save psf_bb, psf_rf, speckle_bb, speckle_rf in npy files.
                         e.g. process = DataPreprocessing(path, normalization=True)
@@ -43,20 +49,39 @@ class DataPreprocessing():
     '''
     
     def __init__(self,
-                 path=constant.DATAPATH,
-                 normalization=True,
+                 loadpath=constant.DATAPATH,
+                 savepath=constant.CACHEPATH,
+                 normalization=True
                  ):
-        self.path = path
+        self.loadpath = loadpath
+        self.savepath = savepath
         self.normalization = normalization
 
-    def save_data(self):
+    def save_data(self, check=True):
         '''
         Note: using 'dictionary' to save large array would become slower after hundreds of iteration.
         Hence, here building four arrays directly ensures memory would be sufficient and run efficiently.
-
+        
+        Arg:
+            check: boolean, whether need to check input data size and data path with which stored in constant.py file.
         '''
         self.__sanitized()
-        file_name = os.listdir(self.path) # file names of all simulation data 
+        psf_bb, psf_rf, speckle_bb, speckle_rf = self.read_mat_file()
+        # save as npy file
+        print('Saving......')
+        if not os.path.exists(self.savepath):
+            os.mkdir(self.savepath)
+        np.save(os.path.join(self.savepath, 'psf_bb.npy'), psf_bb)    
+        np.save(os.path.join(self.savepath, 'psf_rf.npy'), psf_rf)    
+        np.save(os.path.join(self.savepath, 'speckle_bb.npy'), speckle_bb)    
+        np.save(os.path.join(self.savepath, 'speckle_rf.npy'), speckle_rf)    
+    
+        save_info({'k':constant.k,'num_total':constant.DATASIZE[0]}, 'parameters.txt', constant.CACHEPATH)
+    def read_mat_file(self):
+        '''
+        Read data from matlab files. Memory requirement at least 8 GB.
+        '''
+        file_name = os.listdir(self.loadpath) # file names of all simulation data 
         psf_bb = np.zeros(constant.DATASIZE, dtype=complex)
         psf_rf = np.zeros(constant.DATASIZE)
         speckle_bb = np.zeros(constant.DATASIZE,dtype=complex)
@@ -69,8 +94,8 @@ class DataPreprocessing():
                 # split the i-th level-j PSF 
                 ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
                 # convert to index
-                ind = 4*(int(ind[0])-1) + int(ind[1]) - 1 
-                file_path = os.path.join(self.path, name)
+                ind = constant.k*(int(ind[0])-1) + int(ind[1]) - 1 
+                file_path = os.path.join(self.loadpath, name)
                 data = io.loadmat(file_path)
                 psf_bb[ind,:,:] = data.get('psf_bb')
                 psf_rf[ind,:,:] = data.get('psf_rf')
@@ -90,16 +115,8 @@ class DataPreprocessing():
             psf_rf = self.__normalization(psf_rf)
             speckle_bb = self.__normalization(speckle_bb)
             speckle_rf = self.__normalization(speckle_rf)
-        # save as npy file
-        print('Saving......')
-        if not os.path.exists(constant.CACHEPATH):
-            os.mkdir(constant.CACHEPATH)
-        np.save(os.path.join(constant.CACHEPATH, 'psf_bb.npy'), psf_bb)    
-        np.save(os.path.join(constant.CACHEPATH, 'psf_rf.npy'), psf_rf)    
-        np.save(os.path.join(constant.CACHEPATH, 'speckle_bb.npy'), speckle_bb)    
-        np.save(os.path.join(constant.CACHEPATH, 'speckle_rf.npy'), speckle_rf)    
-
-        
+        return psf_bb, psf_rf, speckle_bb, speckle_rf
+  
     def __expand_dims(self, x):
         '''
         Expand input dimension to [N,H,W,C]. 
@@ -125,8 +142,8 @@ class DataPreprocessing():
         '''
         Automatically check if the data size and path are compatible with them in constant.py
         '''
-        file_name = os.listdir(self.path) # file names of all simulation data
-        if self.path == constant.DATAPATH:
+        file_name = os.listdir(self.loadpath) # file names of all simulation data
+        if self.loadpath == constant.DATAPATH:
             assert self.get_data_size(file_name) == constant.DATASIZE, 'Check the data size'
         else:
             raise ValueError('Unsupported path')
@@ -142,7 +159,7 @@ class DataPreprocessing():
                 validname = name
             else:
                 continue
-        file_path = os.path.join(self.path, validname)
+        file_path = os.path.join(self.loadpath, validname)
         data = io.loadmat(file_path)
         shape = data.get('psf_bb').shape
         return (num,) + shape
@@ -177,11 +194,15 @@ class GetData(DataPreprocessing):
     
         self.indices = None # indices after random shuffle
         self.dataset = None # a dictionary for training pair
-
+        self._recreate = False
         
     def __call__(self):
         if self.num_training > constant.DATASIZE[0]:
             raise ValueError(f"Dataset only has {constant.DATASIZE[0]} samples but requires {self.num_training} training data")
+        print('Trying to check files ... \n ')
+        self.__sanitized()
+        if self._recreate:
+            self.info('w')
         # select rf or BB data
         if self.complex_network:
             dtype = ['speckle_bb', 'psf_bb']
@@ -192,7 +213,6 @@ class GetData(DataPreprocessing):
             dtype[0]:['x_train', 'x_test'],
             dtype[1]:['y_train', 'y_test']
             }
- 
         self.__shuffle_data()
         
         x_train, x_test = self.get_data(dtype[0])
@@ -201,10 +221,8 @@ class GetData(DataPreprocessing):
         if self.forward:   
             self.dataset['ideal_psf'] = ['ideal_train', 'ideal_test']   
             ideal_train, ideal_test = self.get_data('ideal_psf')
-            self.info('w')
             return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
         else:
-            self.info('w')
             return (x_train, y_train), (x_test, y_test)
         
     def get_data(self, dtype):
@@ -220,12 +238,20 @@ class GetData(DataPreprocessing):
             training data, testing data
         '''
         try:
-            self.__sanitized()
-            train, test = self.__read_cache(self.dataset[dtype][0]), self.__read_cache(self.dataset[dtype][1])
-            return train, test
-        except (FileNotFoundError,AssertionError):
-            print('Files need to recreate \n')
-            print(f'{dtype} file is creating ... \n')
+            if self._recreate:
+                print(f"{dtype} file is creating ...")
+                if dtype in {'ideal_psf'}:
+                    if self.complex_network:
+                        return self.__slice('psf_bb', ideal=True)
+                    else:
+                        return self.__slice('psf_rf', ideal=True)
+                else:
+                    return self.__slice(dtype)
+            else:
+                train, test = self.__read_cache(self.dataset[dtype][0]), self.__read_cache(self.dataset[dtype][1])
+                return train, test
+        except FileNotFoundError:
+            print(f"File is not found, trying to recreate{dtype} file")
             if dtype in {'ideal_psf'}:
                 if self.complex_network:
                     return self.__slice('psf_bb', ideal=True)
@@ -233,7 +259,22 @@ class GetData(DataPreprocessing):
                     return self.__slice('psf_rf', ideal=True)
             else:
                 return self.__slice(dtype)
-    
+        
+    def __sanitized(self):
+        prepar = self.info('r') # if not found -> raise FileNotFoundError -> recreate root file
+        nowpar = self.info()
+        if len(prepar.keys()) != len(nowpar.keys()):
+            # only root file has created -> create sub file
+            self._recreate = True
+        for key in prepar.keys():
+            if key in {'k','num_total'}:
+                if prepar[key] != nowpar[key]:
+                    # recreate root file
+                    raise ValueError('Root file requires to recreate')
+                else:
+                    # recreate sub file
+                    self._recreate = True
+        
     def find_indices(self):
         train_indices = self.indices[:self.num_training]
         test_indices = self.indices[self.num_training:]
@@ -247,8 +288,8 @@ class GetData(DataPreprocessing):
                 ind: int or None, the i-th data or whole dataset.
                 train: boolean, this index is from training data or testing data.
         '''
-        level = np.arange(4) + 1
-        level = np.tile(level, constant.DATASIZE[0]//4)
+        level = np.arange(constant.k) + 1 # convert range from [0,k-1] to [1,k].
+        level = np.tile(level, constant.DATASIZE[0]//constant.k)
         train_indices, test_indices = self.find_indices()
         if train:
             level_of_train = level[train_indices]
@@ -267,7 +308,11 @@ class GetData(DataPreprocessing):
         '''
         Input arguments setting
         '''
+        saved_dir = constant.CACHEPATH
+        file_name = 'parameters.txt'
         saved_var = {
+            'k':constant.k,
+            'num_total':constant.DATASIZE[0],
             'factor':self.factor,
             'num_training':self.num_training,
             'complex_network':self.complex_network,
@@ -275,9 +320,6 @@ class GetData(DataPreprocessing):
             'seed':self.seed,
             'DIRECTORY':self.DIRECTORY
             }
-        saved_dir = constant.CACHEPATH
-        file_name = 'parameters.txt'
-        
         if op is None:
             return saved_var
         elif op == 'r':
@@ -315,6 +357,8 @@ class GetData(DataPreprocessing):
         if self.factor:
             data = downsampling(data, self.factor, 'axial')
         if ideal:
+            if constant.k != 4:
+                raise ValueError(f"Obtain idea PSF only support for k = 4, but get k ={constant.k}")
             ideal_psf = data[::4] 
             data = np.repeat(ideal_psf, 4, axis=0) # replicate by 4 times
             assert data.shape[0] == constant.DATASIZE[0]
@@ -328,32 +372,30 @@ class GetData(DataPreprocessing):
         self.__save_cache(test, self.dataset[dtype][1])
         return train, test
     
-    def __sanitized(self):
-        print('Trying to check files ... \n ')
-        prepar = self.info('r') # previous saved parameters
-        nowpar = self.info() # now parameters
-        for key in prepar.keys():
-            assert prepar[key] == nowpar[key]
-        
+       
     
     def __save_cache(self, x, name):
         '''
         Save training pairs.
         '''
         assert isinstance(name, str)
-        print(f'Saving {name} ... \n')
+        print(f'Saving {name} ... ')
         np.save(os.path.join(self.DIRECTORY, name + '.npy'), x)
     
     def __read_cache(self, name):
         assert isinstance(name, str)
-        print(f'Reading {name} ... \n')
+        print(f'Reading {name} ... ')
         return np.load(os.path.join(self.DIRECTORY, name + '.npy'))
+
+                
     
     def __load_file(self, path):
         '''
         load data saved by Preprocessing(), if the data size is odd, the first column or row is removed.
         '''
         return np.load(path)[:, constant.DATASIZE[1]%2:, constant.DATASIZE[2]%2:, :]
+
+            
     
     def __output_shape(self):
         output_shape = (self.num_training,) + \
