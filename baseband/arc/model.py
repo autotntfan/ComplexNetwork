@@ -25,13 +25,12 @@ class Model():
                  batch_size=2,
                  lr=1e-4,
                  epochs=8,
-                 validation_split=0.2,
+                 validation_split=0,
                  validation_data=None,
                  seed=7414,
                  activations='LeakyReLU',
                  losses='ComplexMSE',
                  forward=False,
-                 apply_batchnorm=True,
                  dropout_rate=None,
                  callbacks=None,
                  complex_network=True):
@@ -45,7 +44,6 @@ class Model():
         self.seed = seed
         self.activations = activations
         self.losses = losses
-        self.apply_batchnorm = apply_batchnorm
         self.dropout_rate = dropout_rate
         self.callbacks = callbacks
         self.complex_network = complex_network
@@ -110,19 +108,16 @@ class Model():
     def downsample(self, filters, size):
         
         result = tf.keras.Sequential()
-
         result.add(
             self.convFunc(filters, size, strides=2, padding='same', use_bias=False)
             )
-        if self.apply_batchnorm:
-            result.add(self.bnFunc())
-        if self.dropout_rate:
-            result.add(Dropout(self.dropout_rate))
+        result.add(self.bnFunc())
         result.add(self.activations())
         result.add(self.convFunc(filters, size, padding='same', use_bias=False))
-        if self.apply_batchnorm:
-            result.add(self.bnFunc())
+        result.add(self.bnFunc())
         result.add(self.activations())
+        if self.dropout_rate:
+            result.add(Dropout(self.dropout_rate))
         return result
 
     def upsample(self, filters, size):
@@ -133,14 +128,13 @@ class Model():
             result.add(self.convFunc(filters, size, strides=2, padding='same', transposed=True))
         else:
             result.add(Conv2DTranspose(filters, size, strides=2, padding='same'))
-        if self.apply_batchnorm:
-            result.add(self.bnFunc())
-        if self.dropout_rate:
-            result.add(Dropout(self.dropout_rate))
+        result.add(self.bnFunc())
         result.add(self.activations())
         result.add(self.convFunc(filters, size, padding='same', use_bias=False))
         result.add(self.bnFunc())
         result.add(self.activations())
+        if self.dropout_rate:
+            result.add(Dropout(self.dropout_rate))
         return result
         
     def core(self):
@@ -187,6 +181,7 @@ class Model():
             x = self.convFunc(2*self.filters, 3, padding='same', use_bias=False)(x)
             x = self.bnFunc()(x)
             x = self.activations()(x)
+            
         x = self.convFunc(1, 3, padding='same', use_bias=False)(x)
         x = self.bnFunc()(x)
     
@@ -225,7 +220,7 @@ class Model():
         return f'{type_}model_{forward}_{epochs}_{self.losses}_{self.activations}_' + day_month_year
     
     def info(self):
-        return {
+        model_info = {
             'input_shape':self.input_shape,
             'forward':self.forward,
             'callback':self.callbacks,
@@ -239,8 +234,15 @@ class Model():
             'activation':str(self.activations),
             'loss':str(self.losses),
             }
-
-
+        if self.validation_rate:
+            return model_info
+        elif self.validation_data is not None:
+            cache_path = os.path.join(r'./parameters', 'parameters.txt')
+            with open(cache_path, 'r') as f:
+                content = f.read() # type of content is string
+            cache_info = eval(content) # convert string to dict
+            model_info['validation_split'] = cache_info['validation_split']
+            return model_info
             
     def running(self, x, y):
         '''
@@ -255,6 +257,7 @@ class Model():
             x_val, y_val = self.validation_data
         train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(self.batch_size)
         valid_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(self.batch_size)
+        
         self.model = self.build_model(x_train.shape[1:])
         self.model.summary()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
