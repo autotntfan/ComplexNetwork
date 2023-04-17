@@ -16,7 +16,7 @@ height      = 5e-3;                 % = 5 mm
 pitch       = 3e-4;                 % = 0.3 mm
 kerf        = 0;
 Nelements   = 128;
-FOV         = 0.5*Nelements;        % field of view, the x-direction size of beamformed RF data.
+FOV         = 0.25*Nelements;        % field of view, the x-direction size of beamformed RF data.
 focus       = [0 0 1e3]/1000;       % initial electronic focus at 1000 mm
 f_num       = 2;                    % f#
 beamspacing = 4;                    % how many pixel in one beam (beam width)
@@ -94,14 +94,7 @@ full_dataset = reshape(v, [], Nelements, Nelements); % size = (Nsample, received
 Noffset = round((t-2*tc)*fs); % t*fs: the time for the first sample in v (fieldII), round(2*tc*fs): half pulse length offset
 Nsample = size(full_dataset, 1); % size(v, 1) depending on sampling rate
 
-% ----- scat_dist: scatterer location (x,z) -----
-% scatterer distribution
-den         = 0.05 + 0.45*rand(1);                    % scatterer's density, [0.05,0.5]
-Nscat       = round(den*Npz*Npx);                   % number of scatterers with in a patch
-scat_space  = zeros(Npz,Npx);                       % distribution space size = (Npz,Npx)
-scat_indice = randi(numel(scat_space),[1,Nscat]);   % scatterer's location at which index
-scat_space(scat_indice) = randn(Nscat,1);           % scatterer's amplitude (random normal)
-scat_space = reshape(scat_space, [Npz, Npx]);
+
 
 
 % ------ prepare for beamformed RF data ------ 
@@ -125,9 +118,11 @@ distance    = abs(xx_aline - xx_elem + 1j*repmat(z,[1,FOV*beamspacing, Nelements
 % e.g. value at (2,2,2) in a 3*3*3 matrix, its general index is 2*(3*3*3) + 1*3 + 2 = 59, i.e. the 59-th element in this array
 index3D  = repelem((0:Nelements-1)*(Nsample+1), Nsample,1,Nelements) + ... % 2-nd dim index
            repelem(reshape((Nsample+1)*Nelements*(0:Nelements-1), 1,1,[]), Nsample, Nelements, 1); % 3-rd dim index
+index3D = uint32(index3D);
 % ------ Apply delay profile ------
 maxdelay = [0, 1, 1.5, 2]/4; % (*pi)
-
+specklescale = [1,1,1.5,2];
+clear xx_aline xx_elem v
 for k = 1:4
     aberratedchanneldata  = zeros(Nsample+1,Nelements,Nelements);
     delay_curve_in_sample = round(delay_curve * maxdelay(k) * lambda_in_sample); % delay how many samples
@@ -139,7 +134,9 @@ for k = 1:4
     end
     % ------ STA beamforming ------
     RFdata = zeros(Nsample, FOV);
-    for Nline = 1:beamspacing*FOV % beamform an aline in one time
+
+    tic
+    for Nline = 1:beamspacing*FOV
         % f # mask: 2* means abs(x_aline(Nline) - x_elem) only consider one side of aperture
         % f_num_mask_rx: where the aperture larger than f # (how many tx elements used, (aperture for different depth, which rx element used, copy all rx element's mask along tx element)
         % f_num_mask_tx: where the aperture larger than f # (how many rx elements used, (aperture for different depth, copy the i-th tx element's mask along rx element, which tx element used)
@@ -151,12 +148,13 @@ for k = 1:4
         channel_ind = ceil(Nlinedistance/soundv*fs - Noffset); % convert delay in time to in sample
         channel_ind(channel_ind > Nsample) = Nsample + 1; % limit delay index
         channel_ind(channel_ind < 1) = Nsample + 1; % received signal before t=0
-        channel_ind = channel_ind + index3D; % convert array index to general index
+        channel_ind = uint32(channel_ind) + index3D; % convert array index to general index
         % sum the channel data from the K tx elements and K rx elements,where K is related to the f # mask.
         % dimension means (Nsample, channel data from rx element, channel data from tx element)
         RFdata(:,Nline) = sum(f_num_mask_rx.*f_num_mask_tx.*aberratedchanneldata(channel_ind), [2,3]); 
-
     end
+    toc
+
     lpf = fir1(48, f0/(fs/2))'; % cutoff freq. at 0.8*(bw*f0) Hz
     BBdata = conv2(RFdata.*exp(-1j*2*pi*f0*(0:size(RFdata, 1)-1)'/fs), lpf, 'same');
     % -------- PSF Preprocessing ---------
@@ -178,6 +176,8 @@ for k = 1:4
 %     end
 
     for ipt = 2:size(positions,1)-1 % start from the second to the next to last point location.
+        
+
         [~, z_pt_start_ind] = min(abs(z - (positions(ipt,3) - psfsegz*lambda) )); % start index of a PSF region
         [~, z_pt_end_ind] = min(abs(z - (positions(ipt,3) + psfsegz*lambda) ));   % end index of a PSF region
         [~, x_pt_end_ind] = min(abs(x_aline - psfsegx*lambda)); % start index of a PSF region
@@ -204,8 +204,25 @@ for k = 1:4
         ylabel('Depth (mm)')
         axis image;
 
-        % produce speckle
+        % -----  produce speckle ----- 
+        % scatterer size (larger than patch size to preserve the edge
+        % information
+        Nsx = (Npx - 1)*specklescale(k)*2 + 1;
+        Nsz = (Npz - 1)*2 + 1;
+        % generate scatterer distribution
+        den         = 0.05 + 0.45*rand(1);                    % scatterer's density, [0.05,0.5]
+        Nscat       = round(den*Nsz*Nsx);                   % number of scatterers with in a patch
+        scat_space  = zeros(Nsz,Nsx);                       % distribution space size = (Npz,Npx)
+        scat_indice = randi(numel(scat_space),[1,Nscat]);   % scatterer's location at which index
+        scat_space(scat_indice) = randn(Nscat,1);           % scatterer's amplitude (random normal)
+        scat_space = reshape(scat_space, [Nsz, Nsx]);
+        % generate RF speckle
         speckle_rf = conv2(scat_space, psf_rf, 'same'); % psf is a filter
+        % segment the patch with size (Npz,Npx)
+        % (Nsz+1)/2: the center index along this direction
+        % (Npx - 1)*specklescale(k)/2: the top N or bottom N indices
+        speckle_rf = speckle_rf((Nsz+1)/2 - (Npz-1)/2:(Nsz+1)/2 + (Npz-1)/2, (Nsx+1)/2 - (Npx-1)*specklescale(k)/2:(Nsx+1)/2 + (Npx-1)*specklescale(k)/2);
+        speckle_rf = imresize(speckle_rf, [Npz,Npx], 'bilinear');
         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
 %         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
         envelope = abs(speckle_bb);
@@ -223,6 +240,7 @@ for k = 1:4
         saveas(fig, fullfile(savepath,['Data_', num2str(ipt), '_delay_', num2str(k), '.png']));
 
     end
+    break
 end
 
 
