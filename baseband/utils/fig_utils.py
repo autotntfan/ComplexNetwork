@@ -299,25 +299,24 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         err, err_2channel, _ = err_statistic(pred, ref, levels, inds, **kwargs)
         # error for different level
         start = 0
-        colors  = ['pink','hotpink','magenta','m']
-        for level in range(1,5):
+        for level in range(1,constant.k+1):
             level_n_mse = err['sumerr'][err['level'] == level]
             level_n_LBPD = err['LBPD'][err['level'] == level]
             level_n_ABPD = err['ABPD'][err['level'] == level]
             end = start + level_n_mse.shape[0]
             fig1 = plt.figure(1)
-            plt.plot(np.arange(start,end), level_n_mse, colors[level-1])
+            plt.plot(np.arange(start,end), level_n_mse, constant.COLORSHIT[level-1])
             plt.plot(np.arange(start,end), np.mean(level_n_mse)*np.ones(end-start),'black')
             plt.title('Error summation')
             plt.xlabel('Sample')
             fig2 = plt.figure(2)
-            plt.plot(np.arange(start, end), level_n_LBPD, colors[level-1])
+            plt.plot(np.arange(start, end), level_n_LBPD, constant.COLORSHIT[level-1])
             plt.plot(np.arange(start, end), np.mean(level_n_LBPD)*np.ones(end-start),'black')
             plt.title('LBPD difference')
             plt.xlabel('Sample')
             plt.ylabel('LBPD')
             fig3 = plt.figure(3)
-            plt.plot(np.arange(start, end), level_n_ABPD, colors[level-1])
+            plt.plot(np.arange(start, end), level_n_ABPD, constant.COLORSHIT[level-1])
             plt.plot(np.arange(start, end), np.mean(level_n_ABPD)*np.ones(end-start),'black')
             plt.title('ABPD difference')          
             plt.xlabel('Sample')
@@ -438,15 +437,14 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
     for ii in range(pred.shape[0]):
         delay[ii] = get_delaycurve(inds[ii])
     BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
-    colors = ['red','green','blue','black']
-    labels = ['level1','level2','level3','level4']
+    labels = ['level'+str(ii+1) for ii in range(constant.k)]
     f1 = plt.figure(1)
     ax1 = f1.add_subplot(111)
     f2 = plt.figure(2)
     ax2 = f2.add_subplot(111)
-    for level in range(1,5):
-        sortinds = np.argsort(BPDs[levels==level]) # sort BPDs of level-n
-        Linds = inds[levels==level][sortinds] # level-n index
+    for level in range(1,constant.k+1):
+        sortinds = np.argsort(BPDs[levels==level]) # sort level-n BPDs
+        Linds = inds[levels==level][sortinds] # level-n sorted index
         Ldelay = delay[levels==level][sortinds] # level-n delay
         Lproj_pred = proj_pred[levels==level][sortinds] # level-n predicted projection
         Lproj_ref = proj_ref[levels==level][sortinds] # level-n reference projection
@@ -454,8 +452,8 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
         Lpred = pred[levels==level][sortinds] # level-n prediction
         Lref = ref[levels==level][sortinds] # level-n reference
         Ldelay = delay[levels==level][sortinds] # level-n delay curve
-        ax1.plot(np.mean(Lproj_pred,axis=0), color=colors[level-1],label=labels[level-1])
-        ax2.plot(np.mean(Lproj_ref,axis=0), color=colors[level-1],label=labels[level-1])
+        ax1.plot(np.mean(Lproj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
+        ax2.plot(np.mean(Lproj_ref,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
         
         for ii in range(np.size(LBPDs)):
             dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
@@ -463,7 +461,7 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
             plt.figure()
             plt.plot(Lproj_pred[ii], label='Prediction')
             plt.plot(Lproj_ref[ii], linestyle='dashed',label='Ground truth')
-            plt.title(f"level-{level} {direction} projection_i{inds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
+            plt.title(f"level-{level} {direction} projection_i{Linds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
             plt.legend()
             save_fig(model_name, saved_name + 'proj', dir_)
             plt.close()
@@ -540,7 +538,6 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
     gap = 20
     # --------
     iou, DRs, mask1, mask2 = IOU(signal1, signal2, DR, gain, gap)
-    colors = ['red','green','blue','black']
     title_names = ['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB']
     # draw iou in different regions for each image
     for ii in range(iou.shape[1]):
@@ -565,7 +562,7 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
         progressbar(ii+1, iou.shape[1], 'Drawing IOU')
     # draw iou distribution for the whole dataset in a sequence of phase aberration level.
     start = 0
-    for level in range(1,5):
+    for level in range(1,constant.k+1):
         # phase aberration level
         level_n_iou = iou[:,levels==level]
         end = start + level_n_iou.shape[1] # number of level-n iou
@@ -573,7 +570,7 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             # DR interval
             plt.figure(iDR+1)
             # draw iou distribution under this aberration level for different regions
-            plt.scatter(np.arange(start,end),level_n_iou[iDR],c=colors[level-1])
+            plt.scatter(np.arange(start,end),level_n_iou[iDR],c=constant.COLORSHIT[level-1])
             plt.title(title_names[iDR])
             plt.xlabel('Sample')
             plt.ylabel('IOU scores')
