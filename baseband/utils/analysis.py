@@ -12,7 +12,7 @@ if __name__ == '__main__':
     addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
-    from baseband.utils.data_utils import angle, projection, envelope_detection, split_complex, normalization
+    from baseband.utils.data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing
     from baseband.utils.info import get_delaycurve
     from baseband.setting import constant
     sys.path.remove(addpath)
@@ -165,7 +165,6 @@ def save_metrics(signal1, signal2, levels, model_name):
     focus = [False, False, True, True]
     envelope = [False, True, False, True]
     types = ['raw data', 'envelope', 'focus raw data', 'focus envelope']
-    iou_ratio(signal1, signal2, levels)
     with open(file_name,'w') as f:
         for ii in range(4):
             f.write('\n' + types[ii] + ' metrics: \n')
@@ -267,7 +266,7 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         }
     return err, err_2channel, delay
 
-def iou_ratio(pred, ref, levels, threshold=0.5):
+def iou_ratio(pred, ref, levels, threshold=0.5, focus=True):
     '''
     Calculate the ratio of iou larger than threshold.
     Args:
@@ -279,6 +278,8 @@ def iou_ratio(pred, ref, levels, threshold=0.5):
     assert pred.shape == ref.shape
     if threshold > 1 or threshold < 0:
         raise ValueError(f"Threshold must be in the range of [0,1] but given {threshold}")
+    if focus:
+        pred, ref = focusing(pred), focusing(ref)
     # --------
     gain = 0
     DR = 60
