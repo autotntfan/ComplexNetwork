@@ -165,6 +165,7 @@ def save_metrics(signal1, signal2, levels, model_name):
     focus = [False, False, True, True]
     envelope = [False, True, False, True]
     types = ['raw data', 'envelope', 'focus raw data', 'focus envelope']
+
     with open(file_name,'w') as f:
         for ii in range(4):
             f.write('\n' + types[ii] + ' metrics: \n')
@@ -173,6 +174,8 @@ def save_metrics(signal1, signal2, levels, model_name):
             f.write('ssim ' + str(ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
             f.write('ms_ssim ' + str(ms_ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
         f.write("\n Ratios of IOU larger than 0.5 \n" +  str(iou_ratio(signal1, signal2, levels)) + "\n")
+        f.write("\n Beam pattern projection difference \n" + str(leveln_BPD(signal1, signal2, levels)) + "\n")
+        
             
 def __preprocessing(signal1, signal2, focus=False, envelope=False):
     if focus:
@@ -305,6 +308,28 @@ def iou_ratio(pred, ref, levels, threshold=0.5, focus=True):
                       columns=column,
                       index=['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB'])
     return df
+
+def leveln_BPD(pred, ref, levels, focus=True):
+    if focus:
+        pred, ref = focusing(pred), focusing(ref)
+    LBPD = BPD(pred, ref, direction='lateral')
+    ABPD = BPD(pred, ref, direction='axial')
+    data_LBPD = []
+    data_ABPD = []
+
+    # mean ± std
+    for level in range(1,constant.k+1):
+        leveln_LBPD = LBPD[levels==level]
+        leveln_ABPD = ABPD[levels==level]
+        data_LBPD.append(str(np.mean(leveln_LBPD)) + ' ± ' + str(np.std(leveln_LBPD)))
+        data_ABPD.append(str(np.mean(leveln_ABPD)) + ' ± ' + str(np.std(leveln_ABPD)))
+    column = ['level-'+str(ii+1) for ii in range(constant.k)]
+    df = pd.DataFrame(columns=column)
+    df.loc['LBPD'] = data_LBPD
+    df.loc['ABPD'] = data_ABPD
+
+    return df
+        
 
 
     
