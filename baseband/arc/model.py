@@ -16,6 +16,16 @@ from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, BatchNormali
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.activations import tanh
 from datetime import datetime
+if __name__ == '__main__':
+    import sys
+    currentpath = os.getcwd()
+    addpath = os.path.dirname(os.path.dirname(currentpath))
+    if addpath not in sys.path:
+        sys.path.append(addpath)
+    from baseband.setting import constant
+    sys.path.remove(addpath)
+else:
+    from ..setting import constant
 
 class Model():
     
@@ -233,52 +243,73 @@ class Model():
             'epochs':self.epochs,
             'activation':str(self.activations),
             'loss':str(self.losses),
+            'dropout_rate':self.dropout_rate
             }
         if self.validation_rate:
             return model_info
         elif self.validation_data is not None:
-            cache_path = os.path.join(r'./parameters', 'parameters.txt')
-            with open(cache_path, 'r') as f:
+            cache_file = os.path.join(constant.CACHEPATH, 'parameters.txt')
+            with open(cache_file, 'r') as f:
                 content = f.read() # type of content is string
             cache_info = eval(content) # convert string to dict
             model_info['validation_split'] = cache_info['validation_split']
             return model_info
+          
             
-    def running(self, x, y):
+    def training(self, x, y, model=None):
         '''
             without supporting Forward model
         '''
-        if self.validation_rate:
+        history = {
+            'loss':[]
+            }
+        x_train, y_train = x, y
+        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(self.batch_size)
+        if self.validation_data is not None:
+            x_val, y_val = self.validation_data
+        elif self.validation_rate:
             num_train = round(x.shape[0]*(1-self.validation_rate))
             x_train, y_train = x[:num_train], y[:num_train]
             x_val, y_val = x[num_train:], y[num_train:]
-        if self.validation_data:
-            x_train, y_train = x, y
-            x_val, y_val = self.validation_data
-        train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(self.batch_size)
-        valid_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(self.batch_size)
-        
-        self.model = self.build_model(x_train.shape[1:])
+        try:
+            valid_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(self.batch_size)
+            no_validation = False
+            history['val_loss'] = []
+        except Exception:
+            no_validation = True
+        # model_name = self.generate_name()
+        if model is None:
+            self.model = self.build_model(x_train.shape[1:])
+        else:
+            self.model = model
         self.model.summary()
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
-        history = {
-            'loss':[],
-            'val_loss':[]
-            }
+        
         for epoch in range(self.epochs):
             s = time.time()
             loss_train_epoch = []
-            loss_valid_epoch = []
             for step, (x_batch_train, y_batch_train) in enumerate(train_dataset):
                 loss_train_epoch.append(self.train_step(x_batch_train, y_batch_train))
             history['loss'].append(np.mean(loss_train_epoch))
-            for x_batch_val, y_batch_val in valid_dataset:
-                loss_valid_epoch.append(self.test_step(x_batch_val, y_batch_val))
-            history['val_loss'].append(np.mean(loss_valid_epoch))
-            e = time.time()
-            print(f'Epoch:{epoch+1}/{self.epochs} - {(e-s):.1f}s - ' \
-                  f'loss:{np.mean(loss_train_epoch):.6f} - ' \
-                  f'val_loss:{np.mean(loss_valid_epoch):.6f} \n')
+            if no_validation:
+                e = time.time()
+                print(f'Epoch:{epoch+1}/{self.epochs} - {(e-s):.1f}s - ' \
+                      f'loss:{np.mean(loss_train_epoch):.6f} - \n')
+            else:
+                loss_valid_epoch = []
+                for x_batch_val, y_batch_val in valid_dataset:
+                    loss_valid_epoch.append(self.test_step(x_batch_val, y_batch_val))
+                history['val_loss'].append(np.mean(loss_valid_epoch))
+                e = time.time()
+                print(f'Epoch:{epoch+1}/{self.epochs} - {(e-s):.1f}s - ' \
+                      f'loss:{np.mean(loss_train_epoch):.6f} - ' \
+                      f'val_loss:{np.mean(loss_valid_epoch):.6f} \n')
+            # if (epoch+1)%50 == 0:
+            #     print('saving')
+            #     save_path = os.path.join(constant.MODELPATH, model_name, f'checkpoints/chkpt-epoch{epoch+1:04d}/')
+            #     if os.path.exists(save_path):
+            #         os.makedirs(save_path)
+            #     self.model.save_weights(save_path)
         return self.model, history
     
     @tf.function
@@ -294,3 +325,4 @@ class Model():
     def test_step(self, x, y):
         val_result = self.model(x, training=False)
         return self.losses(y, val_result)
+    
