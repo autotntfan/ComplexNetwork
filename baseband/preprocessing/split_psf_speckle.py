@@ -291,7 +291,7 @@ class GetData(SaveAllData):
             self._recreate = True
         for key in prepar.keys():
             if prepar[key] != nowpar[key]:
-                if key in {'k','num_total'}:
+                if key in {'k','num_total', 'saved_cache_path', 'load_path'}:
                     raise ValueError('Root file requires to recreate')
                 else:
                     # recreate sub file
