@@ -118,7 +118,8 @@ class zReLU(Layer):
     
     def compute_output_shape(self, input_shape):
         return input_shape
-
+    
+# from tensorflow.keras.layers import Layer
 class FLeakyReLU(Layer):
     def __init__(self, alpha=0.01, **kwargs):
         super().__init__(**kwargs)
@@ -133,20 +134,20 @@ class FLeakyReLU(Layer):
         self.built = True
         
     def call(self, inputs):
-        # values larger than positive threshold
+        '''
+            FLeakyReLU(x) = alpha*(x+|threshold|), if x < -|threshold|
+                          = x - |threshold|, if |threshold| < x
+                          = 0, otherwise
+        '''
+        # For any positive value. Truncated to zero if it's less than the threshold.
         positive = tf.nn.relu(inputs - tf.abs(self.threshold))
-        '''
-        values less than positive threshold:
-            since relu only eliminate values less than zeros, minus sign
-            is added to ensure desired value over zero and then recover 
-            to the original value
-        '''
+        # For any negative value. Truncated to zero if it's larger than the threshold.
         negative = self.alpha * -tf.nn.relu(-inputs - tf.abs(self.threshold))
-        # finally, combine the two region
+        # finally, combine the two regions
         return positive + negative
 
     def get_config(self):
-        # any declared variable inside __init__ is required to be in config
+        # any declared variables inside __init__ are required to be in config
         base_config = super().get_config()
         config = {'alpha': self.alpha}
         return dict(list(base_config.items()) + list(config.items()))
