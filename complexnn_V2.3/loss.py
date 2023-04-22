@@ -210,7 +210,7 @@ def _SSIM_core(y_true, y_pred, func):
     '''
     if y_pred.shape[-1]%2:
         y_pred = _normalization(y_pred)
-        return 1 - tf.reduce_mean(func(y_pred,y_true,max_val=2,filter_size=15))
+        return 1 - tf.reduce_mean(func(y_pred+1,y_true+1,max_val=2,filter_size=15))
     else:
         # envelope_true = _envelope_detection(y_true)
         # envelope_pred = _envelope_detection(y_pred)
@@ -218,6 +218,8 @@ def _SSIM_core(y_true, y_pred, func):
         y_pred = _normalization(y_pred)
         return 1 - tf.reduce_mean(func(y_pred+1, y_true+1, max_val=2,filter_size=15))
         # pi = 2*tf.acos(0.)
+        
+        
         # angle_ssim = 1 - tf.reduce_mean(func(_angle(y_pred),_angle(y_true),max_val=2*pi,filter_size=7))
         # envelope_ssim = 1 - tf.reduce_mean(func(envelope_pred,envelope_true,max_val=1,filter_size=7))
         # return (angle_ssim + envelope_ssim)/2
