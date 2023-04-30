@@ -2,7 +2,7 @@ function GenerateOnePSF(Nmatlab, Npsfset)
 % Generate simulated RF/BB point spread function and its associated RF/BB speckle
 % rng('shuffle');
 addpath('./Field2');
-savepath = './simulation_data_2xsamelargerspeckle';
+savepath = './simulation_data1';
 if ~exist(savepath, 'dir')
     mkdir(savepath)
 end
@@ -40,20 +40,7 @@ FOV    = ceil(psfsegx*2*lambda/pitch); % field of view, the x-direction size of 
 % lambda = soundv/f0; dt = lambda/soundv = 1/f0 (one-way wavelength);
 % convert length to # of pixels　?　1/f0*fs = fs/f0
 lambda_in_sample = fs/f0;   % lambda length represented in sample. [13.333 33.3333]
-% ------ delay profile ------
-% the phase aberration profile follows the near field phase screen model
-% and assumes its correlation length to be 5mm.
-x    = randn(1, Nelements); % Nelements delay
-bt   = 0.5; % the 3-dB bandwidth-symbol time product
-sps  = 16;  % samples per symbol
-span = 8;   % filter spans 8 symbols
-% total 8*16 = 128 + 1 sample
-h    = gaussdesign(bt, span, sps);
-delay_curve = conv(x, h, 'same');
-% limit delay_curve in [-0.5,0.5]
-delay_curve = (delay_curve - min(delay_curve));  % shift to all positive values
-delay_curve = delay_curve / max(delay_curve);    % limited in [0,1]
-delay_curve = delay_curve - 0.5;         % limited in [-0.5,0.5]
+
 % ------ generate full dataset using Field II ------
 field_init(0)
 set_field('fs',fs);
@@ -127,38 +114,56 @@ index3D = uint32(index3D);
 index3D = index3D(z_pt_start_ind:z_pt_end_ind, :,:);
 % ------ Apply delay profile ------
 maxdelay = [0, 1, 1.5, 2]/4; % (*pi)
-specklescale_x = [2,2,2,2];
-specklescale_z = [2,2,2,2];
+specklescale_x = [1,1,1,1];
+specklescale_z = [1,1,1,1];
 
-for k = 1:4
-    aberratedchanneldata  = zeros(Nsample+1,Nelements,Nelements);
-    delay_curve_in_sample = round(delay_curve * maxdelay(k) * lambda_in_sample); % delay how many samples
-    for itx = 1:Nelements 
-        % full_dataset(:, :, itx): one channel data, obtained by the itx-th transmitting element and all received Nelements.
-        % delay_curve1(itx): delay applied to only one tx element
-        % delay_curve1: delay applied to all Nelements
-        aberratedchanneldata(1:end-1, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
-    end
-    % ------ STA beamforming ------
-    psf_rf = zeros(length(beamformed_region_z), length(beamformed_region_x_aline));
+k = mod(ind,length(maxdelay));
+if k == 0
+    k = length(maxdelay);
+end
+% ------ delay profile ------
+% the phase aberration profile follows the near field phase screen model
+% and assumes its correlation length to be 5mm.
+x    = randn(1, Nelements); % Nelements delay
+bt   = 0.5; % the 3-dB bandwidth-symbol time product
+sps  = 16;  % samples per symbol
+span = 8;   % filter spans 8 symbols
+% total 8*16 = 128 + 1 sample
+h    = gaussdesign(bt, span, sps);
+delay_curve = conv(x, h, 'same');
+% limit delay_curve in [-0.5,0.5]
+delay_curve = (delay_curve - min(delay_curve));  % shift to all positive values
+delay_curve = delay_curve / max(delay_curve);    % limited in [0,1]
+delay_curve = delay_curve - 0.5;         % limited in [-0.5,0.5]
+delay_curve = delay_curve * maxdelay(k);
+aberratedchanneldata  = zeros(Nsample+1,Nelements,Nelements);
+delay_curve_in_sample = round(delay_curve* lambda_in_sample); % delay how many samples
+for itx = 1:Nelements 
+    % full_dataset(:, :, itx): one channel data, obtained by the itx-th transmitting element and all received Nelements.
+    % delay_curve1(itx): delay applied to only one tx element
+    % delay_curve1: delay applied to all Nelements
+    aberratedchanneldata(1:end-1, :, itx) = Apply_Delay(full_dataset(:, :, itx), delay_curve_in_sample+delay_curve_in_sample(itx)); 
+end
+% ------ STA beamforming ------
+psf_rf = zeros(length(beamformed_region_z), length(beamformed_region_x_aline));
 
-    for Nline = 1:length(beamformed_region_x_aline)
-        % f # mask: 2* means abs(x_aline(Nline) - x_elem) only consider one side of aperture
-        % f_num_mask_rx: where the aperture larger than f # (how many tx elements used, (aperture for different depth, which rx element used, copy all rx element's mask along tx element)
-        % f_num_mask_tx: where the aperture larger than f # (how many rx elements used, (aperture for different depth, copy the i-th tx element's mask along rx element, which tx element used)
-        f_num_mask_rx = double(beamformed_region_z./(2*abs(beamformed_region_x_aline(Nline) - x_elem)) > f_num); % size = (Nsample, Nelements) = (Nsample, Nelements, 1)
-        f_num_mask_tx = reshape(f_num_mask_rx, length(beamformed_region_z), 1, Nelements);      % size = (Nsample, 1, Nelements)
-        Nlinedistance = distance(:,Nline,:) + squeeze(distance(:,Nline,:));         % distance btw the Nline-th aline and tx + rx
-        % delay(:,Nline,:): tx delay, (delay at different depth, copy the same delay for each tx element, delay btw the Nline-th aline and i-th element)
-        % squeeze(delay(:,Nline,:)): rx delay, (delay at different depth, delay btw all aline and i-th element, copy the same delay for each tx element)
-        channel_ind = ceil(Nlinedistance/soundv*fs - Noffset); % convert delay in time to in sample
-        channel_ind(channel_ind > Nsample) = Nsample + 1; % limit delay index
-        channel_ind(channel_ind < 1) = Nsample + 1; % received signal before t=0
-        channel_ind = uint32(channel_ind) + index3D; % convert array index to general index
-        % sum the channel data from the K tx elements and K rx elements,where K is related to the f # mask.
-        % dimension means (Nsample, channel data from rx element, channel data from tx element)
-        psf_rf(:,Nline) = sum(f_num_mask_rx.*f_num_mask_tx.*aberratedchanneldata(channel_ind), [2,3]); 
-    end
+for Nline = 1:length(beamformed_region_x_aline)
+    % f # mask: 2* means abs(x_aline(Nline) - x_elem) only consider one side of aperture
+    % f_num_mask_rx: where the aperture larger than f # (how many tx elements used, (aperture for different depth, which rx element used, copy all rx element's mask along tx element)
+    % f_num_mask_tx: where the aperture larger than f # (how many rx elements used, (aperture for different depth, copy the i-th tx element's mask along rx element, which tx element used)
+    f_num_mask_rx = double(beamformed_region_z./(2*abs(beamformed_region_x_aline(Nline) - x_elem)) > f_num); % size = (Nsample, Nelements) = (Nsample, Nelements, 1)
+    f_num_mask_tx = reshape(f_num_mask_rx, length(beamformed_region_z), 1, Nelements);      % size = (Nsample, 1, Nelements)
+    Nlinedistance = distance(:,Nline,:) + squeeze(distance(:,Nline,:));         % distance btw the Nline-th aline and tx + rx
+    % delay(:,Nline,:): tx delay, (delay at different depth, copy the same delay for each tx element, delay btw the Nline-th aline and i-th element)
+    % squeeze(delay(:,Nline,:)): rx delay, (delay at different depth, delay btw all aline and i-th element, copy the same delay for each tx element)
+    channel_ind = ceil(Nlinedistance/soundv*fs - Noffset); % convert delay in time to in sample
+    channel_ind(channel_ind > Nsample) = Nsample + 1; % limit delay index
+    channel_ind(channel_ind < 1) = Nsample + 1; % received signal before t=0
+    channel_ind = uint32(channel_ind) + index3D; % convert array index to general index
+    % sum the channel data from the K tx elements and K rx elements,where K is related to the f # mask.
+    % dimension means (Nsample, channel data from rx element, channel data from tx element)
+    psf_rf(:,Nline) = sum(f_num_mask_rx.*f_num_mask_tx.*aberratedchanneldata(channel_ind), [2,3]); 
+end
 
 %     lpf = fir1(48, f0/(fs/2))'; % cutoff freq. at 0.8*(bw*f0) Hz
 %     BBdata = conv2(psf_rf.*exp(-1j*2*pi*f0*(0:size(psf_rf, 1)-1)'/fs), lpf, 'same');
@@ -180,68 +185,68 @@ for k = 1:4
 %         plot(z*1e3,1e-26*ii+tmp(:,ii,128)), hold on
 %     end
 
-        newz = interp1(z_pt_start_ind:z_pt_end_ind, z(z_pt_start_ind:z_pt_end_ind), linspace(z_pt_start_ind,z_pt_end_ind,Npz));
-        newx = interp1(x_pt_start_ind:x_pt_end_ind, x_aline(x_pt_start_ind:x_pt_end_ind), linspace(x_pt_start_ind,x_pt_end_ind,Npx));
-        depth = z(z_pt_start_ind);
-        dx = newx(2) - newx(1);
-        dz = newz(2) - newz(1);
-        newfs = soundv/2/dz;
-        lpf = fir1(48, f0/(newfs/2))';
+newz = interp1(z_pt_start_ind:z_pt_end_ind, z(z_pt_start_ind:z_pt_end_ind), linspace(z_pt_start_ind,z_pt_end_ind,Npz));
+newx = interp1(x_pt_start_ind:x_pt_end_ind, x_aline(x_pt_start_ind:x_pt_end_ind), linspace(x_pt_start_ind,x_pt_end_ind,Npx));
+depth = z(z_pt_start_ind);
+dx = newx(2) - newx(1);
+dz = newz(2) - newz(1);
+newfs = soundv/2/dz;
+lpf = fir1(48, f0/(newfs/2))';
 
-        psf_rf = imresize(psf_rf, [Npz,Npx], 'bilinear');
-        psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(0:size(psf_rf,1)-1)'./newfs), lpf, 'same');
+psf_rf = imresize(psf_rf, [Npz,Npx], 'bilinear');
+psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(0:size(psf_rf,1)-1)'./newfs), lpf, 'same');
 %         psf_bb = conv2(psf_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
-        envelope = abs(psf_bb);
-        envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
-        fig = figure('visible','off');
+envelope = abs(psf_bb);
+envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
+fig = figure('visible','off');
 
-        subplot(121)
-        image(newx*1e3, newz*1e3, envelope_dB+gain);
-        colormap(gray(DR));colorbar;
-        xlabel('Lateral position (mm)')
-        ylabel('Depth (mm)')
-        axis image;
+subplot(121)
+image(newx*1e3, newz*1e3, envelope_dB+gain);
+colormap(gray(DR));colorbar;
+xlabel('Lateral position (mm)')
+ylabel('Depth (mm)')
+axis image;
 
-        % -----  produce speckle ----- 
-        % scatterer size (larger than patch size to preserve the edge
-        % information
-        Nsx = (Npx - 1)*specklescale_x(k)*2 + 1;
-        Nsz = (Npz - 1)*specklescale_z(k)*2 + 1;
-        % generate scatterer distribution
-        den         = 0.05 + 0.45*rand(1);                    % scatterer's density, [0.05,0.5]
-        Nscat       = round(den*Nsz*Nsx);                   % number of scatterers with in a patch
-        scat_space  = zeros(Nsz,Nsx);                       % distribution space size = (Npz,Npx)
-        scat_indice = randi(numel(scat_space),[1,Nscat]);   % scatterer's location at which index
-        scat_space(scat_indice) = randn(Nscat,1);           % scatterer's amplitude (random normal)
-        scat_space = reshape(scat_space, [Nsz, Nsx]);
-        % generate RF speckle
-        speckle_rf = conv2(scat_space, psf_rf, 'same'); % psf is a filter
-        % segment the patch with size (Npz,Npx)
-        % (Nsz+1)/2: the center index along this direction
-        % (Npx - 1)*specklescale(k)/2: the top N or bottom N indices
-        speckle_rf = speckle_rf((Nsz+1)/2 - (Npz-1)*specklescale_z(k)/2:(Nsz+1)/2 + (Npz-1)*specklescale_z(k)/2, (Nsx+1)/2 - (Npx-1)*specklescale_x(k)/2:(Nsx+1)/2 + (Npx-1)*specklescale_x(k)/2);
-        speckle_rf = imresize(speckle_rf, [Npz,Npx], 'bilinear');
-        newfs = soundv/2/(dz*specklescale_z(k));
-        lpf = fir1(48, f0/(newfs*speckle_scale_z(k)/2))';
-        speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
+% -----  produce speckle ----- 
+% scatterer size (larger than patch size to preserve the edge
+% information
+Nsx = (Npx - 1)*specklescale_x(k)*2 + 1;
+Nsz = (Npz - 1)*specklescale_z(k)*2 + 1;
+% generate scatterer distribution
+den         = 0.05 + 0.45*rand(1);                    % scatterer's density, [0.05,0.5]
+Nscat       = round(den*Nsz*Nsx);                   % number of scatterers with in a patch
+scat_space  = zeros(Nsz,Nsx);                       % distribution space size = (Npz,Npx)
+scat_indice = randi(numel(scat_space),[1,Nscat]);   % scatterer's location at which index
+scat_space(scat_indice) = randn(Nscat,1);           % scatterer's amplitude (random normal)
+scat_space = reshape(scat_space, [Nsz, Nsx]);
+% generate RF speckle
+speckle_rf = conv2(scat_space, psf_rf, 'same'); % psf is a filter
+% segment the patch with size (Npz,Npx)
+% (Nsz+1)/2: the center index along this direction
+% (Npx - 1)*specklescale(k)/2: the top N or bottom N indices
+speckle_rf = speckle_rf((Nsz+1)/2 - (Npz-1)*specklescale_z(k)/2:(Nsz+1)/2 + (Npz-1)*specklescale_z(k)/2, (Nsx+1)/2 - (Npx-1)*specklescale_x(k)/2:(Nsx+1)/2 + (Npx-1)*specklescale_x(k)/2);
+speckle_rf = imresize(speckle_rf, [Npz,Npx], 'bilinear');
+newfs = soundv/2/(dz*specklescale_z(k));
+lpf = fir1(48, f0/(newfs*specklescale_z(k)/2))';
+speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(0:size(speckle_rf,1)-1)'./newfs), lpf, 'same');
 %         speckle_bb = conv2(speckle_rf.*exp(-1j*2*pi*f0*(2*newz'/soundv)), lpf, 'same');
-        envelope = abs(speckle_bb);
-        envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
+envelope = abs(speckle_bb);
+envelope_dB = 20*log10(envelope/max(envelope, [], 'all')+eps);
 
-        subplot(122)
-        image(specklescale_x(k)*newx*1e3, specklescale_z(k)*newz*1e3, envelope_dB+gain);
-        colormap(gray(DR));colorbar;
-        xlabel('Lateral position (mm)')
-        ylabel('Depth (mm)')
-        axis image;
+subplot(122)
+image(specklescale_x(k)*newx*1e3, specklescale_z(k)*newz*1e3, envelope_dB+gain);
+colormap(gray(DR));colorbar;
+xlabel('Lateral position (mm)')
+ylabel('Depth (mm)')
+axis image;
 
 
 %         save(fullfile(savepath,['Data_', num2str(ind), '_delay_', num2str(k), '.mat']), 'psf_rf', 'psf_bb', 'speckle_rf', 'speckle_bb', 'dx', 'dz', 'depth', 'f0', 'k', 'bw', 'delay_curve');
-        parsave(fullfile(savepath,['Data_', num2str(ind), '_delay_', num2str(k), '.mat']), psf_rf, psf_bb, speckle_rf, speckle_bb, dx, dz, depth, f0, k, bw, delay_curve);
-        saveas(fig, fullfile(savepath,['Data_', num2str(ind), '_delay_', num2str(k), '.png']));
-    
-end
+parsave(fullfile(savepath,['Data_', num2str(ceil(ind/length(maxdelay))), '_delay_', num2str(k), '.mat']), psf_rf, psf_bb, speckle_rf, speckle_bb, dx, dz, depth, f0, k, bw, delay_curve);
+saveas(fig, fullfile(savepath,['Data_', num2str(ceil(ind/length(maxdelay))), '_delay_', num2str(k), '.png']));
 toc
+end
+
 end
 
 
