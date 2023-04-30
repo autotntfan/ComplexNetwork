@@ -321,8 +321,8 @@ def leveln_BPD(pred, ref, levels, focus=True):
     for level in range(1,constant.k+1):
         leveln_LBPD = LBPD[levels==level]
         leveln_ABPD = ABPD[levels==level]
-        data_LBPD.append(str(np.mean(leveln_LBPD)) + ' ± ' + str(np.std(leveln_LBPD)))
-        data_ABPD.append(str(np.mean(leveln_ABPD)) + ' ± ' + str(np.std(leveln_ABPD)))
+        data_LBPD.append(str(np.round(np.mean(leveln_LBPD),2)) + ' ± ' + str(np.round(np.std(leveln_LBPD),2)))
+        data_ABPD.append(str(np.round(np.mean(leveln_ABPD),2)) + ' ± ' + str(np.round(np.std(leveln_ABPD),2)))
     column = ['level-'+str(ii+1) for ii in range(constant.k)]
     df = pd.DataFrame(columns=column)
     df.loc['LBPD'] = data_LBPD
