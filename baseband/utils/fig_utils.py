@@ -85,7 +85,7 @@ def gray(img, DR=60, gain=None, axis=None, title_name=None, show=True, *args, **
         plt.title(title_name)
     plt.colorbar()
     save_fig(*args, **kwargs)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
 
 def heatmap(img, axis=None, title_name=None, show=True, *args, **kwargs):
@@ -114,7 +114,7 @@ def heatmap(img, axis=None, title_name=None, show=True, *args, **kwargs):
     if title_name is not None:
         plt.title(title_name)
     save_fig(*args, **kwargs)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
 
 def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, *args, **kwargs):
@@ -138,7 +138,7 @@ def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, *args, *
     if title_name is not None:
         plt.title(title_name)
     save_fig(*args, **kwargs)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
 
 def envelope_fig(img, 
@@ -196,7 +196,7 @@ def fft_fig(signal, ind, Aline=False, saved_name='Spectrum', model_name=None, sh
     plt.xlabel('MHz')
     plt.title('Spectrum')
     save_fig(model_name,saved_name)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
     
     
@@ -260,7 +260,7 @@ def project_fig(signal, ref=None, gain=0, direction='lateral', focus=True, show=
     else:
         raise ValueError('Direction must be lateral or axial')
     save_fig(*args, **kwargs)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
     
 def delay_fig(delay, title_name='Delay curve', show=True, *args, **kwargs):
@@ -271,7 +271,7 @@ def delay_fig(delay, title_name='Delay curve', show=True, *args, **kwargs):
     plt.title(title_name)
     plt.ylim((-0.5,0.5))
     save_fig(*args, **kwargs)
-    plt.show() if show else plt.close()
+    plt.show() if show else plt.close('all')
 
 # ------------------------- displayed according to phase aberration level -------------------------
 def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
@@ -299,29 +299,37 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         err, err_2channel, _ = err_statistic(pred, ref, levels, inds, **kwargs)
         # error for different level
         start = 0
+        fig1, ax1 = plt.subplots(1,1)
+        fig2, ax2 = plt.subplots(1,1)
+        fig3, ax3 = plt.subplots(1,1)
         for level in range(1,constant.k+1):
             level_n_mse = err['sumerr'][err['level'] == level]
             level_n_LBPD = err['LBPD'][err['level'] == level]
             level_n_ABPD = err['ABPD'][err['level'] == level]
-            end = start + level_n_mse.shape[0]
-            fig1 = plt.figure(1)
-            plt.plot(np.arange(start,end), level_n_mse, constant.COLORSHIT[level-1])
-            plt.plot(np.arange(start,end), np.mean(level_n_mse)*np.ones(end-start),'black')
-            plt.title('Error summation')
-            plt.xlabel('Sample')
-            fig2 = plt.figure(2)
-            plt.plot(np.arange(start, end), level_n_LBPD, constant.COLORSHIT[level-1])
-            plt.plot(np.arange(start, end), np.mean(level_n_LBPD)*np.ones(end-start),'black')
-            plt.title('LBPD difference')
-            plt.xlabel('Sample')
-            plt.ylabel('LBPD')
-            fig3 = plt.figure(3)
-            plt.plot(np.arange(start, end), level_n_ABPD, constant.COLORSHIT[level-1])
-            plt.plot(np.arange(start, end), np.mean(level_n_ABPD)*np.ones(end-start),'black')
-            plt.title('ABPD difference')          
-            plt.xlabel('Sample')
-            plt.ylabel('LBPD')
-            start = end
+            end = start + level_n_mse.shape[0] # start level-n index
+            # fig1
+            ax1.plot(np.arange(start,end), level_n_mse, constant.COLORSHIT[level-1])
+            ax1.plot(np.arange(start,end), np.mean(level_n_mse)*np.ones(end-start),'black')
+            # fig2
+            ax2.plot(np.arange(start, end), level_n_LBPD, constant.COLORSHIT[level-1])
+            ax2.plot(np.arange(start, end), np.mean(level_n_LBPD)*np.ones(end-start),'black')
+            # fig3
+            ax3.plot(np.arange(start, end), level_n_ABPD, constant.COLORSHIT[level-1])
+            ax3.plot(np.arange(start, end), np.mean(level_n_ABPD)*np.ones(end-start),'black')
+            start = end # end level-n index
+            
+        ax1.set_title('Error summation')
+        ax1.set_xlabel('Sample')
+        ax1.set_ylabel('Error')
+        
+        ax2.set_title('LBPD difference')
+        ax2.set_xlabel('Sample')
+        ax2.set_ylabel('LBPD')
+        
+        ax3.set_title('ABPD difference')          
+        ax3.set_xlabel('Sample')
+        ax3.set_ylabel('LBPD')
+            
         name = os.path.join(constant.MODELPATH, model_name, model_name)
         fig1.savefig(name + '_errordistribution.png', dpi=300)
         fig2.savefig(name + '_LBPDdistribution.png', dpi=300)
@@ -438,10 +446,8 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
         delay[ii] = get_delaycurve(inds[ii])
     BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
     labels = ['level'+str(ii+1) for ii in range(constant.k)]
-    f1 = plt.figure(1)
-    ax1 = f1.add_subplot(111)
-    f2 = plt.figure(2)
-    ax2 = f2.add_subplot(111)
+    fig1, ax1 = plt.subplots(1,1)
+    fig2, ax2 = plt.subplots(1,1)
     for level in range(1,constant.k+1):
         sortinds = np.argsort(BPDs[levels==level]) # sort level-n BPDs
         Linds = inds[levels==level][sortinds] # level-n sorted index
@@ -464,7 +470,7 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
             plt.title(f"level-{level} {direction} projection_i{Linds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
             plt.legend()
             save_fig(model_name, saved_name + 'proj', dir_)
-            plt.close()
+            plt.close('all')
             envelope_fig(Lpred[ii], 
                          title_name='Prediction Bmode_i' + str(Linds[ii]), 
                          ind=Linds[ii], 
@@ -498,19 +504,19 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
         plt.plot(np.mean(Lproj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
         plt.legend()
         save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
-        plt.close()
+        plt.close('all')
     # draw and save figure 1 and figure 2
     ax1.set_title('Prediction')
     ax1.set_xlabel('Lateral position (mm)')
     ax1.set_ylabel('Depth (mm)')
     ax1.legend()
-    save_fig(model_name, 'avgLBPDprediction', fig=f1)
+    save_fig(model_name, 'avgLBPDprediction', fig=fig1)
     plt.close(1)
     ax2.set_title('Ground truth')
     ax2.set_xlabel('Lateral position (mm)')
     ax2.set_ylabel('Depth (mm)')
     ax2.legend()
-    save_fig(model_name, 'avgLBPDreference', fig=f2)
+    save_fig(model_name, 'avgLBPDreference', fig=fig2)
     plt.close(2)
 
 def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
@@ -558,7 +564,7 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             plt.imshow(mask2[iDR,ii], cmap='gray', vmin=0, vmax=1, aspect='auto')
             plt.title(title_names[iDR] + str(iou[iDR,ii]))
         save_fig(model_name, 'IOU_L' + str(levels[ii]) + '_i' + str(inds[ii]), 'IOU')
-        plt.close()
+        plt.close('all')
         progressbar(ii+1, iou.shape[1], 'Drawing IOU')
     # draw iou distribution for the whole dataset in a sequence of phase aberration level.
     start = 0
