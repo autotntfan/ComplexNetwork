@@ -156,11 +156,7 @@ def get_delaycurve(ind):
     # obtain delay profile
     try:
         delay = get_data(ind, 'delay_curve')
-        level = get_level(ind)
-        if level != 1:
-            return delay*level/8*2 # unit in pi
-        else:
-            return delay*0
+        return delay # unit in pi
     except TypeError:
         return 0
     
