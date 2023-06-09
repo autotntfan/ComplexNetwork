@@ -468,7 +468,7 @@ class ComplexBatchNormalization(Layer):
                 update_list.append(K.moving_average_update(self.moving_Vrr, Vrr, self.momentum))
                 update_list.append(K.moving_average_update(self.moving_Vii, Vii, self.momentum))
                 update_list.append(K.moving_average_update(self.moving_Vri, Vri, self.momentum))
-            self.add_update(update_list, inputs)
+            self.add_update(update_list)
 
             def normalize_inference():
                 if self.center:
