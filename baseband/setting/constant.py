@@ -30,13 +30,15 @@ if not os.path.exists(CACHEPATH):
 # import numpy as np
 
 # MODELPATH = r'./modelinfo_diffc' # path of saved model
-# DATAPATH  = r'./simulation_data_diffc_4000' # path of simulation data
+# DATAPATH  = r'../MATLAB/simulation_data_diffc_shareOnePSF_4' # path of simulation data
 # CACHEPATH = r'./parameters_diffc' # path of splitted data
 
 
-# DATASIZE    = (4000,257,257) # simulation data size
-# k           = 8
-# SPEEDLIST   = np.arange(1460,1620,20)
+# DATASIZE    = (2000,257,257) # simulation data size
+# k           = 4
+# # k           = 8
+# SPEEDLIST   = np.linspace(1500,1560,k)
+# # SPEEDLIST   = np.linspace(1460,1600,k)
 # FOV         = (16,32)        # field of view, unit in lambda, i.e. (H,W) = (16lambda,32lambda)
 # EPS         = 1e-16
 # SOUNDV      = 1540
