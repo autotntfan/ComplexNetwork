@@ -19,13 +19,13 @@ if __name__ == '__main__':
     from baseband.setting import constant
     from baseband.utils.data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from baseband.utils.info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
-    from baseband.utils.analysis import complex_diff, phase_diff, BPD, IOU, err_statistic
+    from baseband.utils.analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU
     sys.path.remove(addpath)
 else:
     from ..setting import constant
     from .data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from .info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
-    from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic
+    from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU
 
 # ------------------------- basic figure -------------------------
 def save_fig(model_name=None, saved_name=None, saved_dir=None, fig=None):
@@ -418,8 +418,8 @@ def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs)
             else:
                 name = 'best' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
             drawfig(pred[ind], ref[ind], delay['delay'][ind], name, **kwargs)
-        
-def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, model_name=None, **kwargs):
+
+def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
     '''
     Plot from the best to worst lateral or axial beam pattern projection with respect to the different phase
     aberration level.
@@ -440,68 +440,81 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
     assert pred.shape == ref.shape
     if focus:
         pred, ref = focusing(pred), focusing(ref)
-    proj_pred, proj_ref = projection(pred, 0), projection(ref, 0)
-    delay = np.zeros((pred.shape[0],constant.NELEMENT))
+    lateral_proj_pred, lateral_proj_ref = projection(pred, 0), projection(ref, 0)
+    axial_proj_pred, axial_proj_ref = projection(pred, 0, 'axial'), projection(ref, 0, 'axial')
+    delay_curve = np.zeros((pred.shape[0],constant.NELEMENT))
     for ii in range(pred.shape[0]):
-        delay[ii] = get_delaycurve(inds[ii])
-    BPDs = BPD(pred, ref, direction=direction, **kwargs) # lateral or axial projection
-    labels = ['level'+str(ii+1) for ii in range(constant.k)]
-    fig1, ax1 = plt.subplots(1,1)
-    fig2, ax2 = plt.subplots(1,1)
-    for level in range(1,constant.k+1):
-        sortinds = np.argsort(BPDs[levels==level]) # sort level-n BPDs
-        Linds = inds[levels==level][sortinds] # level-n sorted index
-        Ldelay = delay[levels==level][sortinds] # level-n delay
-        Lproj_pred = proj_pred[levels==level][sortinds] # level-n predicted projection
-        Lproj_ref = proj_ref[levels==level][sortinds] # level-n reference projection
-        LBPDs = BPDs[levels==level][sortinds] # level-n BPD
-        Lpred = pred[levels==level][sortinds] # level-n prediction
-        Lref = ref[levels==level][sortinds] # level-n reference
-        Ldelay = delay[levels==level][sortinds] # level-n delay curve
-        ax1.plot(np.mean(Lproj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
-        ax2.plot(np.mean(Lproj_ref,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
+        delay_curve[ii] = get_delaycurve(inds[ii])
+    LBPDs = BPD(pred, ref, direction='lateral', **kwargs) # lateral or axial projection
+    ABPDs = BPD(pred, ref, direction='axial', **kwargs)
+    level_len = len(np.unique(levels))
+    labels = ['level'+str(ii+1) for ii in range(level_len)]
+    fig1, ax1 = plt.subplots(1,1) # level-n lateral projection of prediction
+    fig2, ax2 = plt.subplots(1,1) # level-n lateral projection of reference
+    for level in range(1,level_len+1):
+        sorted_ind = np.argsort(LBPDs[levels==level])
+        leveln_inds = levels==level # level-n sorted index
+        leveln_data_inds = inds[leveln_inds][sorted_ind]
+        leveln_delay_curve = delay_curve[leveln_inds][sorted_ind] # level-n delay
+        leveln_lateral_proj_pred = lateral_proj_pred[leveln_inds][sorted_ind] # level-n predicted projection
+        leveln_lateral_proj_ref = lateral_proj_ref[leveln_inds][sorted_ind] # level-n reference projection
+        leveln_axial_proj_pred = axial_proj_pred[leveln_inds][sorted_ind] # level-n predicted projection
+        leveln_axial_proj_ref = axial_proj_ref[leveln_inds][sorted_ind]
+        leveln_LBPD = LBPDs[leveln_inds][sorted_ind]  # level-n LBPD
+        leveln_ABPD = ABPDs[leveln_inds][sorted_ind]  # level-n ABPD
+        leveln_pred = pred[leveln_inds][sorted_ind]  # level-n prediction
+        leveln_ref = ref[leveln_inds][sorted_ind] # level-n reference
+        ax1.plot(np.mean(leveln_lateral_proj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
+        ax2.plot(np.mean(leveln_lateral_proj_ref,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
         
-        for ii in range(np.size(LBPDs)):
+        for ii in range(len(sorted_ind)):
             dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
-            saved_name = 'L' + str(level) + '_i' + str(Linds[ii]) + '_rank' + str(ii) # saved name e.g. L4_i129
+            saved_name = 'L' + str(level) + '_i' + str(leveln_data_inds[ii]) + '_rank' + str(ii) # saved name e.g. L4_i129
             plt.figure()
-            plt.plot(Lproj_pred[ii], label='Prediction')
-            plt.plot(Lproj_ref[ii], linestyle='dashed',label='Ground truth')
-            plt.title(f"level-{level} {direction} projection_i{Linds[ii]}_{LBPDs[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
+            plt.plot(leveln_lateral_proj_pred[ii], label='Prediction')
+            plt.plot(leveln_lateral_proj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.title(f"level-{level} lateral projection_i{leveln_data_inds[ii]}_{leveln_LBPD[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
             plt.legend()
-            save_fig(model_name, saved_name + 'proj', dir_)
+            save_fig(model_name, saved_name + 'lateralproj', dir_)
             plt.close('all')
-            envelope_fig(Lpred[ii], 
-                         title_name='Prediction Bmode_i' + str(Linds[ii]), 
-                         ind=Linds[ii], 
+            plt.figure()
+            plt.plot(leveln_axial_proj_pred[ii], label='Prediction')
+            plt.plot(leveln_axial_proj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.title(f"level-{level} axial projection_i{leveln_data_inds[ii]}_{leveln_ABPD[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
+            plt.legend()
+            save_fig(model_name, saved_name + 'axialproj', dir_)
+            plt.close('all')
+            envelope_fig(leveln_pred[ii], 
+                         title_name='Prediction Bmode_i' + str(leveln_data_inds[ii]), 
+                         ind=leveln_data_inds[ii], 
                          model_name=model_name, 
                          saved_name=saved_name+'_Prediction_Bmode',
                          saved_dir=dir_,
                          show=False)
-            envelope_fig(Lref[ii], 
-                         title_name='Ground truth Bmode_i' + str(Linds[ii]), 
-                         ind=Linds[ii], 
+            envelope_fig(leveln_ref[ii], 
+                         title_name='Ground truth Bmode_i' + str(leveln_data_inds[ii]), 
+                         ind=leveln_data_inds[ii], 
                          model_name=model_name, 
                          saved_name=saved_name+'_Groundtruth_Bmode', 
                          saved_dir=dir_,
                          show=False)
-            delay_fig(Ldelay[ii], 
-                      title_name='Delay curve_i' + str(Linds[ii]), 
+            delay_fig(leveln_delay_curve[ii], 
+                      title_name='Delay curve_i' + str(leveln_data_inds[ii]), 
                       model_name=model_name, 
                       saved_name=saved_name+'delay', 
                       saved_dir=dir_,
                       show=False)
-            progressbar(ii+1, np.size(LBPDs), f'Saving level-{level}')
+            progressbar(ii+1, len(sorted_ind), f'Saving level-{level}')
         # draw PR25, PR50, PR75, PR99 projection of prediction and reference
         plt.figure()
-        plt.plot(np.mean(Lproj_pred[:ii//4],axis=0), label='0.25p', color='green')
-        plt.plot(np.mean(Lproj_pred[ii//4:2*ii//4], axis=0), label='0.50p', color='blue')
-        plt.plot(np.mean(Lproj_pred[2*ii//4:3*ii//4],axis=0), label='0.75p', color='red')
-        plt.plot(np.mean(Lproj_pred[3*ii//4:],axis=0), label='1.00p', color='black')
-        plt.plot(np.mean(Lproj_ref[:ii//4], axis=0), linestyle='dashed', label='0.25t', color='green')
-        plt.plot(np.mean(Lproj_ref[ii//4:2*ii//4], axis=0), linestyle='dashed', label='0.50t', color='blue')
-        plt.plot(np.mean(Lproj_ref[2*ii//4:3*ii//4], axis=0), linestyle='dashed', label='0.75t', color='red')
-        plt.plot(np.mean(Lproj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
+        plt.plot(np.mean(leveln_lateral_proj_pred[:ii//4],axis=0), label='0.25p', color='green')
+        plt.plot(np.mean(leveln_lateral_proj_pred[ii//4:2*ii//4], axis=0), label='0.50p', color='blue')
+        plt.plot(np.mean(leveln_lateral_proj_pred[2*ii//4:3*ii//4],axis=0), label='0.75p', color='red')
+        plt.plot(np.mean(leveln_lateral_proj_pred[3*ii//4:],axis=0), label='1.00p', color='black')
+        plt.plot(np.mean(leveln_lateral_proj_ref[:ii//4], axis=0), linestyle='dashed', label='0.25t', color='green')
+        plt.plot(np.mean(leveln_lateral_proj_ref[ii//4:2*ii//4], axis=0), linestyle='dashed', label='0.50t', color='blue')
+        plt.plot(np.mean(leveln_lateral_proj_ref[2*ii//4:3*ii//4], axis=0), linestyle='dashed', label='0.75t', color='red')
+        plt.plot(np.mean(leveln_lateral_proj_ref[3*ii//4:], axis=0), linestyle='dashed', label='1.00t', color='black')
         plt.legend()
         save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
         plt.close('all')
@@ -519,7 +532,7 @@ def levelnBPD_fig(pred, ref, levels, inds, direction='lateral', focus=True, mode
     save_fig(model_name, 'avgLBPDreference', fig=fig2)
     plt.close(2)
 
-def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
+def levelnIOU_fig(signal1, signal2, levels, model_name=None):
     '''
     Draw IOU scores within different regions such as background or main-lobe from weak to strong 
     phase aberration and each level is represented by different colors. The dynamic range is 60dB 
@@ -535,15 +548,28 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
             
     
     '''
+    leveln_iou = leveln_IOU(signal1, signal2, levels)
+    
+    title_names = ['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB']
+    for iDR in range(leveln_iou.shape[0]):
+        start = 0
+        fig, ax = plt.subplots(1,1)
+        for level in range(leveln_iou.shape[1]):
+            end = start + len(leveln_iou[iDR, level]) # number of level-n iou
+            ax.scatter(np.arange(start, end), leveln_iou[iDR, level], c=constant.COLORSHIT[level-1])
+            start = end
+        ax.set_title(title_names[iDR])
+        ax.set_xlabel('Sample')
+        ax.set_ylabel('IOU scores')
+        ax.set_ylim((0.0,1.0))
+        save_fig(model_name, 'IOU_' + str(iDR), fig=fig)
+        plt.show()
+
+def IOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None, DR=60, gain=0):
     assert signal1.shape == signal2.shape
     if focus:
         signal1, signal2 = focusing(signal1), focusing(signal2)
-    # --------
-    gain = 0
-    DR = 60
-    gap = 20
-    # --------
-    iou, DRs, mask1, mask2 = IOU(signal1, signal2, DR, gain, gap)
+    iou, DRs, mask1, mask2 = IOU(signal1, signal2, DR, gain)
     title_names = ['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB']
     # draw iou in different regions for each image
     for ii in range(iou.shape[1]):
@@ -551,38 +577,21 @@ def levelnIOU_fig(signal1, signal2, levels, inds, focus=True, model_name=None):
         envelope_ref = reduce_dim(envelope_detection(signal2[ii], gain))
         plt.figure(figsize=(20,20))
         plt.subplot(5,2,1)
-        plt.imshow(envelope_pred, cmap='gray', vmin=gain-DR, vmax=gain, aspect='auto')
-        plt.title('Prediction')
-        plt.subplot(5,2,2)
         plt.imshow(envelope_ref, cmap='gray', vmin=gain-DR, vmax=gain, aspect='auto')
         plt.title('Ground truth')
+        plt.subplot(5,2,2)
+        plt.imshow(envelope_pred, cmap='gray', vmin=gain-DR, vmax=gain, aspect='auto')
+        plt.title('Prediction')        
         for iDR in range(len(DRs)):
             plt.subplot(5,2,3+2*iDR)
+            plt.imshow(mask2[iDR,ii], cmap='gray', vmin=0, vmax=1, aspect='auto')
+            plt.title(title_names[iDR]  + ' - ' + str(round(iou[iDR,ii],2)))
+            plt.subplot(5,2,4+2*iDR)
             plt.imshow(mask1[iDR,ii], cmap='gray', vmin=0, vmax=1, aspect='auto')
             plt.title(title_names[iDR])
-            plt.subplot(5,2,4+2*iDR)
-            plt.imshow(mask2[iDR,ii], cmap='gray', vmin=0, vmax=1, aspect='auto')
-            plt.title(title_names[iDR] + str(iou[iDR,ii]))
         save_fig(model_name, 'IOU_L' + str(levels[ii]) + '_i' + str(inds[ii]), 'IOU')
         plt.close('all')
         progressbar(ii+1, iou.shape[1], 'Drawing IOU')
-    # draw iou distribution for the whole dataset in a sequence of phase aberration level.
-    start = 0
-    for level in range(1,constant.k+1):
-        # phase aberration level
-        level_n_iou = iou[:,levels==level]
-        end = start + level_n_iou.shape[1] # number of level-n iou
-        for iDR in range(iou.shape[0]):
-            # DR interval
-            plt.figure(iDR+1)
-            # draw iou distribution under this aberration level for different regions
-            plt.scatter(np.arange(start,end),level_n_iou[iDR],c=constant.COLORSHIT[level-1])
-            plt.title(title_names[iDR])
-            plt.xlabel('Sample')
-            plt.ylabel('IOU scores')
-            plt.ylim((0.0,1.0))
-            save_fig(model_name, 'IOU_' + str(iDR))
-        start = end
-    plt.show()
+
 
 
