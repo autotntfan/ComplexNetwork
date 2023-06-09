@@ -29,6 +29,8 @@ def get_custom_object():
     custom_object = {
         'ComplexConv2D':complexnn.conv_test.ComplexConv2D,
         'ComplexBatchNormalization':complexnn.bn_test.ComplexBatchNormalization,
+        'MaxPoolingWithArgmax2D':complexnn.pool_test.MaxPoolingWithArgmax2D,
+        'MaxUnpooling2D':complexnn.pool_test.MaxUnpooling2D,
         'ComplexMSE':complexnn.loss.ComplexMSE,
         'ctanh':complexnn.activation.ctanh,
         'FLeakyReLU': complexnn.activation.FLeakyReLU
