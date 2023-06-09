@@ -130,7 +130,8 @@ class FLeakyReLU(Layer):
         param_shape = list(input_shape[1:])
         self.threshold = self.add_weight(shape=param_shape,
                                           name='threshold',
-                                          initializer='zeros')
+                                          initializer='zeros',
+                                          trainable=True)
         self.built = True
         
     def call(self, inputs):
