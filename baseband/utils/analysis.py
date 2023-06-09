@@ -20,9 +20,10 @@ else:
     from .data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing
     from .info import get_delaycurve
     from ..setting import constant
-    
+import cv2    
 import tensorflow as tf
 import pandas as pd
+from scipy import signal
 # ------------------------- Metrics -------------------------
 def complex_diff(signal1, signal2, normalize=True):
     '''
@@ -92,25 +93,24 @@ def IOU(signal1, signal2, DR=60, gain=0, gap=20):
         signal1: Numpy array with shape [N,H,W,C] or [H,W,C]
         signal2: Numpy array with shape [N,H,W,C] or [H,W,C]
         gain: scalar, image displayed gain
-        gap: scalar, 
+        gap: scalar, interval of dynamic range 
         
     Returns:
-        iou: ndarray, 
-            M-by-N ndarray, where DR is divided into M intervals, e.g. DR=70, M=5, included
-            ~0, 0~20, 20~40, 40~60, 60~70 dB.Each column contains M samples' IOU value during 
-            specific range. Total N signals. Note that
-            M = DR//gap + 1 if DR%gap is 0, otherwise M = DR//gap + 2 (i.e. 60~70 dB)
-        DRs: list, dynamic range interval
+        iou_value: M-by-N ndarray, where DR is divided into M intervals and there are N signals in signal1 array 
+            e.g. DR=60, gain=0, gap=20, include <-60dB, -60~-40dB, -40dB~-20dB, -20dB~0dB (M=4)
+            e.g. DR=70, gain=0, gap=20, included <-70, -70~-50, -50~-30, -30~-10, -10~0 dB. (M=5)
+            Note M = DR//gap + 1 if DR%gap is 0, otherwise M = DR//gap + 2 (i.e. -10~0 dB for DR=70)
+        DRs: list, sequence of dynamic range interval, e.g. [-60,-40,-20,0]
         mask1: boolean ndarray with shape [M,N,H,W]. Binary mask of signal1 in each dynamic range interval
         mask2: boolean ndarray with shape [M,N,H,W]. Binary mask of signal2 in each dynamic range interval
         
     '''
     if signal1.shape != signal2.shape:
-        raise ValueError('Inputs are different size')
+        raise ValueError('Inputs are of different size')
     axis = (1,2) if signal1.ndim == 4 else None # summation along which axes
     DRs = [gaingap for gaingap in range(gain-DR, gain, gap)] + [gain] 
-    signal1 = envelope_detection(signal1, gain)
-    signal2 = envelope_detection(signal2, gain)
+    signal1 = envelope_detection(signal1, gain) # get log-scale data
+    signal2 = envelope_detection(signal2, gain) # get log-scale data
     mask1 = np.zeros((len(DRs),) + signal1.shape)
     mask2 = np.zeros((len(DRs),) + signal1.shape)
     for ii, DRrange in enumerate(DRs):
@@ -125,7 +125,19 @@ def IOU(signal1, signal2, DR=60, gain=0, gap=20):
             mask1[ii] = R1
             mask2[ii] = R2
             iou = np.vstack([iou,np.sum(np.logical_and(R1, R2), axis=axis)/np.sum(np.logical_or(R1, R2), axis=axis)])
-    return np.nan_to_num(iou,nan=0.0), DRs, mask1, mask2
+    iou_value = np.nan_to_num(iou,nan=0.0)
+    return iou_value, DRs, mask1, mask2
+
+def pulse_estimate(RFdata, Nc):
+    N, H, W, C = RFdata.shape
+    center_Aline = RFdata[:,:,W//2,:]
+    hann_window = np.reshape(np.hanning(H), [1,-1,1])
+    cepstrum = np.real(np.fft.ifft(np.log(np.abs(np.fft.fft(center_Aline*hann_window, axis=1))), axis=1));
+    cepstrum[:,2:Nc+1,:] = 2*cepstrum[:,2:Nc+1,:]
+    cepstrum[:,Nc+1:,:] = 0
+    pulse = np.real(np.fft.ifft(np.exp(np.fft.fft(cepstrum, axis=1)), axis=1))
+    pulse = pulse/np.max(np.abs(pulse), axis=(1,2), keepdims=True)
+    return pulse
 
 def mse(signal1, signal2, focus=False, envelope=False, avg=True):
     kwargs = {
@@ -159,13 +171,49 @@ def ms_ssim(signal1, signal2, focus=False, envelope=False, filter_size=7):
         }
     return __ssim_core(signal1, signal2, tf.image.ssim_multiscale, **kwargs)
 
+def ssim_map(signal1, signal2, max_val=2, filter_size=15, filter_sigma=1.5, k1=0.01, k2=0.03):
+    assert signal1.shape == signal2.shape
+    kernelX = cv2.getGaussianKernel(filter_size, filter_sigma)
+    window = kernelX * kernelX.T
+    if signal1.ndim == 2: 
+        H, W = signal1.shape
+        C = 1
+        N = 1
+        signal1 = signal1.reshape(N,H,W,C)
+        signal2 = signal2.reshape(N,H,W,C)
+    elif signal1.ndim == 3:
+        H, W, C = signal1.shape
+        N = 1
+        signal1 = signal1.reshape(N,H,W,C)
+        signal2 = signal2.reshape(N,H,W,C)
+    elif signal1.ndim == 4:
+        N, H, W, C = signal1.shape
+    if filter_size >= H or filter_size >= W:
+        raise ValueError("filter size cannot be larger than width or height")
+    ssim_map = np.zeros((N,H-filter_size+1,W-filter_size+1,C))
+    C1 = (k1*max_val)**2
+    C2 = (k2*max_val)**2
+    for ithsignal in range(N):
+        for ithchannel in range(C):
+            mu1 = signal.convolve2d(signal1[ithsignal,:,:,ithchannel], window, 'valid')
+            mu2 = signal.convolve2d(signal2[ithsignal,:,:,ithchannel], window, 'valid')
+            mu1_sq = mu1*mu1
+            mu2_sq = mu2*mu2
+            mu1_mu2 = mu1*mu2 
+            sigma1_sq = signal.convolve2d(signal1[ithsignal,:,:,ithchannel]*signal1[ithsignal,:,:,ithchannel], window, 'valid') - mu1_sq
+            sigma2_sq = signal.convolve2d(signal2[ithsignal,:,:,ithchannel]*signal2[ithsignal,:,:,ithchannel], window, 'valid') - mu2_sq
+            sigma12 = signal.convolve2d(signal1[ithsignal,:,:,ithchannel]*signal2[ithsignal,:,:,ithchannel], window, 'valid') - mu1_mu2   
+            ssim_map[ithsignal,:,:,ithchannel] = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
+    mssim = np.mean(ssim_map)
+    return mssim,np.squeeze(ssim_map)
+
 def save_metrics(signal1, signal2, levels, model_name):
     save_dir = os.path.join(constant.MODELPATH, model_name)
     file_name = os.path.join(save_dir, model_name + '_metrics.txt')
     focus = [False, False, True, True]
     envelope = [False, True, False, True]
     types = ['raw data', 'envelope', 'focus raw data', 'focus envelope']
-
+    df_scores, df_ratio = leveln_IOU_metric(signal1, signal2, levels)
     with open(file_name,'w') as f:
         for ii in range(4):
             f.write('\n' + types[ii] + ' metrics: \n')
@@ -173,8 +221,9 @@ def save_metrics(signal1, signal2, levels, model_name):
             f.write('mae ' + str(mae(signal1, signal2, focus[ii], envelope[ii])) + '\n')
             f.write('ssim ' + str(ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
             f.write('ms_ssim ' + str(ms_ssim(signal1, signal2, focus[ii], envelope[ii])) + '\n')
-        f.write("\n Ratios of IOU larger than 0.5 \n" +  str(iou_ratio(signal1, signal2, levels)) + "\n")
-        f.write("\n Beam pattern projection difference \n" + str(leveln_BPD(signal1, signal2, levels)) + "\n")
+        f.write("\n Ratios of IOU larger than 0.5 \n" +  str(df_ratio) + "\n")
+        f.write("\n IOU \n" + str(df_scores) + "\n")
+        f.write("\n Beam pattern projection difference \n" + str(leveln_BPD_metric(signal1, signal2, levels)) + "\n")
         
             
 def __preprocessing(signal1, signal2, focus=False, envelope=False):
@@ -269,7 +318,62 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         }
     return err, err_2channel, delay
 
-def iou_ratio(pred, ref, levels, threshold=0.5, focus=True):
+def _leveln_core(pred, ref, levels, metric, focus=True):
+    assert pred.shape == ref.shape
+    if focus:
+        pred, ref = focusing(pred), focusing(ref)
+    level_len = len(np.unique(levels))
+    leveln_data = np.zeros((level_len,), dtype=object)
+    if metric == 'IOU':
+        iou, DRs, *_ = IOU(pred, ref)
+        leveln_data = np.zeros((len(DRs), level_len), dtype=object)
+        for iDR in range(iou.shape[0]):
+            for level in range(1,level_len+1):
+                leveln_data[iDR,level-1] = iou[iDR, levels==level]
+        return leveln_data
+    elif metric == 'LBPD':
+        data = BPD(pred, ref, direction='lateral')
+    elif metric == 'ABPD':
+        data = BPD(pred, ref, direction='axial')
+    elif metric == 'LP':
+        data = projection(pred, 0)
+    elif metric == 'AP':
+        data = projection(pred, 0, direction='axial')
+    for level in range(1, level_len+1):
+        leveln_data[level-1] = data[levels==level]
+    return leveln_data
+
+def leveln_IOU(pred, ref, levels, focus=True):
+    return _leveln_core(pred, ref, levels, 'IOU', focus)
+
+def leveln_LBPD(pred, ref, levels, focus=True):
+    return _leveln_core(pred, ref, levels, 'LBPD', focus)
+
+def leveln_ABPD(pred, ref, levels, focus=True):
+    return _leveln_core(pred, ref, levels, 'ABPD', focus)
+
+def leveln_LP(pred, ref, levels, focus=True):
+    return _leveln_core(pred, ref, levels, 'LP', focus)
+
+def leveln_AP(pred, ref, levels, focus=True):
+    return _leveln_core(pred, ref, levels, 'AP', focus)
+    
+def leveln_BPD_metric(pred, ref, levels, **kwargs):
+    leveln_LBPDs, leveln_ABPDs = leveln_LBPD(pred, ref, levels, **kwargs), leveln_ABPD(pred, ref, levels, **kwargs)
+    data_LBPD = []
+    data_ABPD = []
+    level_len = len(np.unique(levels))
+    # mean ± std
+    for level in range(level_len):
+        data_LBPD.append(str(np.round(np.mean(leveln_LBPDs[level]),2)) + chr(177) + str(np.round(np.std(leveln_LBPDs[level]),2)))
+        data_ABPD.append(str(np.round(np.mean(leveln_ABPDs[level]),2)) + chr(177) + str(np.round(np.std(leveln_ABPDs[level]),2)))
+    column = ['level-'+str(ii+1) for ii in range(level_len)]
+    df = pd.DataFrame(columns=column)
+    df.loc['LBPD'] = data_LBPD
+    df.loc['ABPD'] = data_ABPD
+    return df
+
+def leveln_IOU_metric(pred, ref, levels, threshold=0.5, **kwargs):
     '''
     Calculate the ratio of iou larger than threshold.
     Args:
@@ -278,57 +382,33 @@ def iou_ratio(pred, ref, levels, threshold=0.5, focus=True):
         level: [N,], phase aberration levels.
         threshold: float, iou threshold.
     '''
-    assert pred.shape == ref.shape
     if threshold > 1 or threshold < 0:
         raise ValueError(f"Threshold must be in the range of [0,1] but given {threshold}")
-    if focus:
-        pred, ref = focusing(pred), focusing(ref)
-    # --------
-    gain = 0
-    DR = 60
-    gap = 20
-    # --------
-    iou, DRs, _, _ = IOU(pred, ref, DR, gain, gap)
-    iou_larger_than_half_count = np.zeros((len(DRs), constant.k)) # the number of iou larger than threshold, shape = [DRs, levels]
-    iou_larger_than_half_ratio = np.zeros((len(DRs), constant.k+1)) # the ratio of iou larger than threshold, shape = [DRs, levels+total]
-    for level in range(1,constant.k+1):
-        # phase aberration level
-        level_n_iou = iou[:,levels==level]
-        for iDR in range(iou.shape[0]):
-            # DR interval
+    leveln_iou = leveln_IOU(pred, ref, levels, **kwargs)
+    iou_larger_than_half_count = np.zeros_like(leveln_iou, dtype=np.float32) # the number of iou larger than threshold, shape = [DRs, levels]
+    iou_larger_than_half_ratio = np.zeros_like(leveln_iou, dtype=np.float32) # the ratio of iou larger than threshold, shape = [DRs, levels+total]
+    level_len = len(np.unique(levels))
+    column = ['level-'+str(ii+1) for ii in range(level_len)]
+    index = ['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB']
+    df_scores = pd.DataFrame(columns=column)
+    for iDR in range(leveln_iou.shape[0]):
+        data_iou = [] # iou value: mean ± std 
+        for level in range(leveln_iou.shape[1]):
             # filter which x during the interval is larger than threshold
-            iou_larger_than_half_count[iDR,level-1] = len(list(filter(lambda x: x > threshold, level_n_iou[iDR])))
+            iou_larger_than_half_count[iDR,level] = len(list(filter(lambda x: x > threshold, leveln_iou[iDR, level])))
             # convert to ratio
-            iou_larger_than_half_ratio[iDR,level-1] = iou_larger_than_half_count[iDR,level-1]/len(level_n_iou[iDR])
+            iou_larger_than_half_ratio[iDR,level] = iou_larger_than_half_count[iDR,level]/len(leveln_iou[iDR, level])
+            # mean ± std
+            data_iou.append(str(np.round(np.mean(leveln_iou[iDR, level]),2)) + chr(177) + str(np.round(np.std(leveln_iou[iDR, level]),2)))
+        df_scores.loc[index[iDR]] = data_iou    
     # calculate total ratio for each interval
-    iou_larger_than_half_ratio[:,-1] = np.sum(iou_larger_than_half_count, axis=-1)/pred.shape[0]
-    column = ['level-'+str(ii+1) for ii in range(constant.k)]
+    iou_larger_than_half_ratio = np.c_[iou_larger_than_half_ratio,np.sum(iou_larger_than_half_count, axis=-1)/pred.shape[0]]
     column.append('Total')
-    df = pd.DataFrame(np.round(iou_larger_than_half_ratio*100,2), 
-                      columns=column,
-                      index=['I <= -60dB', '-60dB < I <= -40dB', '-40dB < I <= -20dB', '-20dB < I <= 0dB'])
-    return df
+    df_ratio = pd.DataFrame(np.round(iou_larger_than_half_ratio*100,2), 
+                            columns=column,
+                            index=index)
+    return df_scores, df_ratio
 
-def leveln_BPD(pred, ref, levels, focus=True):
-    if focus:
-        pred, ref = focusing(pred), focusing(ref)
-    LBPD = BPD(pred, ref, direction='lateral')
-    ABPD = BPD(pred, ref, direction='axial')
-    data_LBPD = []
-    data_ABPD = []
-
-    # mean ± std
-    for level in range(1,constant.k+1):
-        leveln_LBPD = LBPD[levels==level]
-        leveln_ABPD = ABPD[levels==level]
-        data_LBPD.append(str(np.round(np.mean(leveln_LBPD),2)) + ' ± ' + str(np.round(np.std(leveln_LBPD),2)))
-        data_ABPD.append(str(np.round(np.mean(leveln_ABPD),2)) + ' ± ' + str(np.round(np.std(leveln_ABPD),2)))
-    column = ['level-'+str(ii+1) for ii in range(constant.k)]
-    df = pd.DataFrame(columns=column)
-    df.loc['LBPD'] = data_LBPD
-    df.loc['ABPD'] = data_ABPD
-
-    return df
         
 
 
