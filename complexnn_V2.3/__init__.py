@@ -9,7 +9,7 @@
 # from . import fft
 
 from . import bn_test, conv_test, dense_test, init_test, norm_test, pool_test
-from . import fft_test
+from . import fft_test, pixelshuffle
 from . import activation, loss
 # from .bn import ComplexBatchNormalization as ComplexBN
 # from .conv import (
@@ -55,7 +55,7 @@ from .init_test import (
 )
 
 from .norm_test import LayerNormalization, ComplexLayerNorm
-from .pool_test import SpectralPooling1D, SpectralPooling2D
+from .pool_test import SpectralPooling1D, SpectralPooling2D, MaxPoolingWithArgmax2D, MaxUnpooling2D
 from .utils_test import (
     get_realpart,
     get_imagpart,
@@ -66,4 +66,5 @@ from .utils_test import (
 )
 
 from .activation import AmplitudeMaxout, cReLU, zReLU, modReLU
-from .loss import ComplexRMS, ComplexMSE, ComplexMAE
+from .loss import ComplexRMS, ComplexMSE, ComplexMAE, SSIM, MS_SSIM, aSSIM_MSE, ssim_map
+from .pixelshuffle import PixelShuffler
