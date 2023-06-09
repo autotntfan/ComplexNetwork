@@ -94,12 +94,12 @@ def _precheck(y_true,y_pred):
 #            _f2()
 #    print(y_true.get_shape().is_compatible_with(y_pred.get_shape()))
     if not tf.is_tensor(y_true):
-        y_true = tf.constant(y_true)
+        y_true = tf.constant(y_true, dtype=tf.float32)
     if not tf.is_tensor(y_pred):
-        y_pred = tf.constant(y_pred)
+        y_pred = tf.constant(y_pred, dtype=tf.float32)
     if y_true.shape.is_fully_defined():
         if not y_true.shape.is_compatible_with(y_pred.shape):
-            raise ValueError('Expected shape is ' + str(K.shape(y_pred)[1:]) + ' but get ' + str(y_true.shape[1:]))
+            raise ValueError('Expected shape is ' + str(y_pred.shape[1:]) + ' but get ' + str(y_true.shape[1:]))
 #        
 #    def _raise_error():
 #        raise ValueError('Expected shape is ' + str(K.shape(y_pred)[1:]) + ' but get ' + str(y_true.shape[1:]))
@@ -174,7 +174,7 @@ def _normalization(signal):
         imag = get_imagpart(signal)
         normalized_target = (real**2 + imag**2)**0.5
     ratio = tf.reduce_max(normalized_target,axis=(1,2,3),keepdims=True)
-    return signal/ratio
+    return tf.math.divide_no_nan(signal,ratio)
 
 def _angle(x):
     return tf.math.angle(tf.complex(get_realpart(x),get_imagpart(x)))
@@ -232,7 +232,7 @@ def SSIM(y_true,y_pred):
 def MS_SSIM(y_true,y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
     return _SSIM_core(y_true, y_pred, tf.image.ssim_multiscale)
-    
+
 def SSIM_MSE(y_true,y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
     ratio = 0.75
@@ -245,6 +245,72 @@ def SSIM_MSE(y_true,y_pred):
     return ratio*ssim + mse
     # return ssim*mse
 
+def aSSIM_MSE(alpha):
+    def ssim_mse(y_true,y_pred):
+        y_true, y_pred = _precheck(y_true, y_pred)
+        if y_pred.shape[-1]%2:
+            mse = MeanSquaredError()
+            mse = mse(y_true, y_pred)
+        else:
+            mse = ComplexMSE(y_true, y_pred)
+        ssim = SSIM(y_true,y_pred)
+        return alpha*ssim + (1-alpha)*mse
+    return ssim_mse
+
+def _gauss2D(shape, sigma):
+    """ 
+    2D gaussian filter - should give the same result as:
+    MATLAB's fspecial('gaussian',[shape],[sigma]) 
+    """
+    if isinstance(shape, tuple) or isinstance(shape, list):
+        m,n = [(ss-1.)/2. for ss in shape]
+    else:
+        m = (shape-1.)/2.
+        n = (shape-1.)/2.
+    y,x = np.ogrid[-m:m+1,-n:n+1]
+    h = np.exp( -(x*x + y*y) / (2.*sigma*sigma) )
+    h.astype('float32')
+    h[ h < np.finfo(h.dtype).eps*h.max() ] = 0
+    sumh = h.sum()
+    if sumh != 0:
+        h /= sumh
+    h = h*2.0
+    h = h.astype('float32')
+    return h
+
+def ssim_map(max_val=2, filter_size=15, filter_sigma=1.5, k1=0.01, k2=0.03):
+    def tf_ssim_map(y_true,y_pred):
+        y_true, y_pred = _precheck(y_true, y_pred)
+        y_pred = _normalization(y_pred)
+        kernelX = _gauss2D(filter_size, filter_sigma)
+        window = np.rot90(kernelX * kernelX.T,2)
+        window = window.reshape(filter_size,filter_size,1,1)
+        window = tf.cast(window, dtype=tf.float32)
+        C1 = (k1*max_val)**2
+        C2 = (k2*max_val)**2
+        ithchannel = 0
+        N,H,W,C = y_true.shape
+        ssimmap_3D = []
+        while ithchannel < C:
+            mu1 = tf.nn.conv2d(y_true[:,:,:,ithchannel:ithchannel+1], window, 1, 'VALID')
+            mu2 = tf.nn.conv2d(y_pred[:,:,:,ithchannel:ithchannel+1], window, 1, 'VALID')
+            mu1_mu2 = tf.multiply(mu1,mu2)
+            mu1_sq = tf.multiply(mu1,mu1)
+            mu2_sq = tf.multiply(mu2,mu2)
+            sigma1_sq = tf.subtract(tf.nn.conv2d(tf.multiply(y_true[:,:,:,ithchannel:ithchannel+1],y_true[:,:,:,ithchannel:ithchannel+1]),window, 1, 'VALID'),mu1_sq)
+            sigma2_sq = tf.subtract(tf.nn.conv2d(tf.multiply(y_pred[:,:,:,ithchannel:ithchannel+1],y_pred[:,:,:,ithchannel:ithchannel+1]),window, 1, 'VALID'),mu2_sq)
+            sigma12 = tf.subtract(tf.nn.conv2d(tf.multiply(y_true[:,:,:,ithchannel:ithchannel+1],y_pred[:,:,:,ithchannel:ithchannel+1]),window, 1, 'VALID'),mu1_mu2)
+            ssimmap_4D = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
+            ssimmap_3D.append(ssimmap_4D[:,:,:,0])
+            ithchannel = ithchannel + 1
+        ssimmap = tf.stack(ssimmap_3D, axis=-1)
+        # ssimmap_larger_zero = tf.nn.relu(ssimmap)
+        minssim = tf.reduce_min(ssimmap)
+        return minssim
+    return tf_ssim_map
+
 get_custom_objects().update({'SSIM': SSIM,
                              'MS_SSIM': MS_SSIM,
-                             'SSIM_MSE': SSIM_MSE})
+                             'SSIM_MSE': SSIM_MSE,
+                             'aSSIM_MSE': aSSIM_MSE,
+                             'SSIM_map': ssim_map})
