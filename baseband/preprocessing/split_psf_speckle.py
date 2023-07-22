@@ -5,6 +5,8 @@ Created on Sun Mar 20 18:31:41 2022
 @author: benzener
 """
 import os
+import numpy as np
+from scipy import io
 if __name__ == '__main__':
     import sys
     currentpath = os.getcwd()
@@ -12,128 +14,31 @@ if __name__ == '__main__':
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
-    from baseband.utils.data_utils import normalization, downsampling
+    from baseband.utils.data_utils import normalization, downsampling, convert_to_real, standardization
     from baseband.utils.info import progressbar, save_info, read_info
     sys.path.remove(addpath)
 else:
     from ..setting import constant
-    from ..utils.data_utils import normalization, downsampling 
+    from ..utils.data_utils import normalization, downsampling, convert_to_real, standardization
     from ..utils.info import progressbar, save_info, read_info
-import numpy as np
-from scipy import io
 
-class SaveAllData():
-    '''
-        Matlab data files end with .mat are read and normalized to [-1,1]. Finally, RF and BB PSFs and speckles are
-        saved in numpy format file with shape [N,H,W,C], where C is 1 for RF data or 2 for BB data.
-        
+class BaseProcess():
+       
+    def get_dataset_size(self, path):
+        '''
+        Automatically calculate the number of files and size of simulation data in the directory.
         Args:
-            load_path: string, where data saves.
-            saved_cache_path: string, where to save data.
-            normalization: boolean, whether to recitify value in the range of [-1,1]
-            k: int, how many kinds of phase aberration. i.e. file name: Data_1_delay_k
-            
-        function:
-            save_data: main function, save psf_bb, psf_rf, speckle_bb, speckle_rf in npy files.
-                        e.g. process = DataPreprocessing(path, normalization=True)
-                             process.save_data()
-            
-            
-            __expand_dims: BB data derived from Matlab file is complex dtype. For convenience, it's divided into two 
-                           channels to store real and imaginary parts respectively.
-                           original (N, 513, 513) in complex data type -> (N, 513, 513, 2) in real data type
-                           e.g.
-                           [4+3i,2-3i] -> [[4,3],[2,-3]]
-                           
-            __normalization: normalize value in the range [-1, 1].
-    '''
-    
-    def __init__(self,
-                 load_path=constant.DATAPATH,
-                 saved_cache_path=constant.CACHEPATH,
-                 normalization=True,
-                 check_size=True
-                 ):
-        self.load_path = load_path
-        self.saved_cache_path = saved_cache_path
-        self.normalization = normalization
-        self.check_size = check_size
-
-    def __call__(self):
-        # Check data size
-        if self.check_size:
-            self.__sanitized()
-        # Get data in mat file
-        dataname = ['psf_bb.npy', 'psf_rf.npy', 'speckle_bb.npy', 'speckle_rf.npy']
-        # Read mat files
-        psf_bb, psf_rf, speckle_bb, speckle_rf = self.read_mat_file()
-        # Convert complex type array to two-channel real-valued array.
-        # Expand dimension to 4D array. The last dimension is channel.
-        psf_bb = self._expand_dims(psf_bb) # [N,H,W,2]
-        psf_rf = self._expand_dims(psf_rf) # [N,H,W,1]
-        speckle_bb = self._expand_dims(speckle_bb) # [N,H,W,2]
-        speckle_rf = self._expand_dims(speckle_rf) # [N,H,W,1]
-        # Normalize in the range of [-1,1]
-        if self.normalization:
-            print('Normalizing......')
-            psf_bb = normalization(psf_bb)
-            psf_rf = normalization(psf_rf)
-            speckle_bb = normalization(speckle_bb)
-            speckle_rf = normalization(speckle_rf)
-        # Save data in a cache file
-        for ii, data in enumerate((psf_bb, psf_rf, speckle_bb, speckle_rf)):
-            self.save_data(data, dataname[ii])
-        # Save data information
-        save_info({'k':constant.k,'num_total':constant.DATASIZE[0]}, 'parameters.txt', self.saved_cache_path)
-
-    def read_mat_file(self):
+            path: String, path of a directory or a "npy" file. If it is a directory, this function will calculate
+            the number of matlab files in the directory (N) and get the speckle size (H,W) saved in the last file. 
+            If it is a file, this function will calculate the data size (H,W) saved in this file.
+        Returns:
+            tuple, shape of data in [N,H,W] or [H,W], where N is the number of files. And the other dimension is
+            determined by the saved data
         '''
-        Read data from matlab files. Memory requirement at least 8 GB.
-        '''
-        file_name = os.listdir(self.load_path) # file names of all simulation data 
-        psf_bb = np.zeros(constant.DATASIZE, dtype=complex)
-        psf_rf = np.zeros(constant.DATASIZE)
-        speckle_bb = np.zeros(constant.DATASIZE,dtype=complex)
-        speckle_rf = np.zeros(constant.DATASIZE)
-        count = 0
-        # read psf and speckle in sequence
-        for name in file_name:
-            if name.endswith('.mat'):
-                count = count + 1
-                # split the i-th level-j PSF 
-                ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
-                # convert to index
-                ind = constant.k*(int(ind[0])-1) + int(ind[1]) - 1 
-                file_path = os.path.join(self.load_path, name)
-                data = io.loadmat(file_path)
-                psf_bb[ind,:,:] = data.get('psf_bb')
-                psf_rf[ind,:,:] = data.get('psf_rf')
-                speckle_bb[ind,:,:] = data.get('speckle_bb')
-                speckle_rf[ind,:,:] = data.get('speckle_rf')
-                progressbar(count, constant.DATASIZE[0], 'Loading data')
-            else:
-                continue
-        return psf_bb, psf_rf, speckle_bb, speckle_rf
-    
-    def save_data(self, data, name):
-        '''
-        Note: using 'dictionary' to save large array would become slower after hundreds of iteration.
-        Instead building four arrays directly ensures memory would be sufficient and run efficiently.
-        
-        Arg:
-            data: ndarray, what to be saved.
-            name: string, what is the saved name.
-        '''
-        # save as npy file
-        print(f'Saving {name} ...')
-        if not os.path.exists(self.saved_cache_path):
-            os.mkdir(self.saved_cache_path)
-        np.save(os.path.join(self.saved_cache_path, name), data)
-                      
-    def get_data_size(self, file_name):
-        '''
-        Automatically calculate the number of files in the directory.
-        '''
+        if isinstance(path, str) and path.endswith('.npy'):
+            data = self.read_npy_file(path)
+            return data.shape
+        file_name = os.listdir(path) # file names of all simulation data 
         num = 0
         for i, name in enumerate(file_name):
             if name.endswith('.mat'):
@@ -141,309 +46,446 @@ class SaveAllData():
                 validname = name
             else:
                 continue
-        file_path = os.path.join(self.load_path, validname)
+        file_path = os.path.join(path, validname)
         data = io.loadmat(file_path)
-        shape = data.get('psf_bb').shape
+        shape = data.get('speckle_rf').shape
         return (num,) + shape
     
-    def _expand_dims(self, x):
+    def expand_dim(self, x):
         '''
-        Expand input dimension to [N,H,W,C]. 
+        Expand input dimension from [N,H,W] to [N,H,W,C]. 
         input is real -> [N,H,W,1]
         input is complex -> [N,H,W,2]
         '''
         if x.dtype == complex:
-            real = np.expand_dims(x.real, axis=-1)
-            imag = np.expand_dims(x.imag, axis=-1)
-            z = np.concatenate((real,imag), axis=-1)
-            return z.astype(np.float32)
+            return convert_to_real(x).astype(np.float32)
         else:
             real = np.expand_dims(x, axis=-1)
             return real.astype(np.float32)
+        
+    def save_npy_file(self, data, path, file_name=None):
+        '''
+        Save data as npy format.       
+        Arg:
+            data: ndarray, what to be saved.
+            path: String, a directory if file_name is not None, otherwise save file regarding to this path.
+            file_name: string, what is the saved name.
+        '''
+        # save as npy file
+        if file_name is not None:
+            if not os.path.exists(path):
+                os.mkdir(path)
+            path = os.path.join(path,file_name)
+        if not path.endswith('.npy'):
+            path = path + '.npy'
+        np.save(path, data)
+        
+    def read_npy_file(self, path, file_name=None):
+        '''
+        Read npy format file
+        Args:
+            path: String, a directory if file_name is not None. Otherwise, save file regarding to this path.
+            file_name: string, what is the saved name.
+        '''
+        if file_name is not None:
+            path = os.path.join(path, file_name)
+        if not path.endswith('.npy'):
+            path = path + '.npy'
+        return np.load(path)           
     
-    def __sanitized(self):
+    def check_datasize(self, path):
         '''
-        Automatically check if the data size and path are compatible with them in constant.py
+        Automatically check if the data size and path are compatible with which in constant.py
         '''
-        file_name = os.listdir(self.load_path) # file names of all simulation data
-        if self.load_path == constant.DATAPATH:
-            assert self.get_data_size(file_name) == constant.DATASIZE, 'Check the data size'
+        if path == constant.DATAPATH:
+            msg = f"Get data size is {self.get_dataset_size(path)}, but it is required to be {constant.DATASIZE} in constant"
+            assert self.get_dataset_size(path) == constant.DATASIZE, msg
         else:
-            raise ValueError('Unsupported path')
+            raise ValueError('Path of dataset is wrong.')
+            
+class SaveAllData(BaseProcess):
+    '''
+        Matlab data files end with .mat are read and normalized to [-1,1]. Finally, RF and BB PSFs and speckles are
+        saved in numpy format file with shape [N,H,W,C], where C is 1 for RF data or 2 for BB data.
+        
+        Args:
+            k: int, how many kinds of phase aberration. i.e. file name: Data_1_delay_k
+            dataset_path: string, where data saves.
+            cache_path: string, where to save data.
+            normalize: boolean, whether to normalize value in the range of [-1,1]
+            standardize: boolean, whether to standardize value. Data will have zero mean and unit standard deviation.
+        Example:
+            func = SaveAllData(
+                k=4,
+                dataset_path=r'./MatlabCheck/simulation_data2',
+                cache_path=r'./parameters',
+                normalize=True,
+                standardize=False
+                )
+            func()
+            
+    '''
+    
+    def __init__(self,
+                 k=4,
+                 dataset_path=r'./MatlabCheck/simulation_data2',
+                 cache_path=r'./parameters',
+                 normalize=True,
+                 standardize=False):
+        self.k = k # k-kind of phase aberration or speed of sound
+        self.dataset_path = dataset_path # path of simulation data
+        self.cache_path = cache_path # path of saved data in npy format
+        self.normalize = normalize # whether to normalize data
+        self.standardize = standardize # whether to standardize data
+
+    def __call__(self):
+        file_name = os.listdir(self.dataset_path) # file names of all simulation data 
+        # Check data size
+        self.check_datasize(self.dataset_path)
+        data_size = self.get_dataset_size(self.dataset_path)
+        psf_bb = np.zeros(data_size, dtype=complex)
+        psf_rf = np.zeros(data_size)
+        speckle_bb = np.zeros(data_size,dtype=complex)
+        speckle_rf = np.zeros(data_size)
+        count = 0
+        # read psf and speckle in sequence
+        for name in file_name:
+            # contain mat and figure files
+            if name.endswith('.mat'):
+                count = count + 1
+                # split the i-th level-j PSF 
+                ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
+                # convert to index
+                ind = self.k*(int(ind[0])-1) + int(ind[1]) - 1 
+                # Note: because name in file_name is not in the order what we want
+                file_path = os.path.join(self.dataset_path, name)
+                data = io.loadmat(file_path)
+                psf_bb[ind,:,:] = data.get('psf_bb')
+                psf_rf[ind,:,:] = data.get('psf_rf')
+                speckle_bb[ind,:,:] = data.get('speckle_bb')
+                speckle_rf[ind,:,:] = data.get('speckle_rf')
+                progressbar(count, data_size[0], 'Loading ...')
+            else:
+                # pass figure files
+                continue
+        # Convert complex type array to two-channel real-valued array.
+        # Expand dimension to 4D array. The last dimension is channel.
+        psf_bb = self.expand_dim(psf_bb) # [N,H,W,2]
+        psf_rf = self.expand_dim(psf_rf) # [N,H,W,1]
+        speckle_bb = self.expand_dim(speckle_bb) # [N,H,W,2]
+        speckle_rf = self.expand_dim(speckle_rf) # [N,H,W,1]
+        # Normalize in the range of [-1,1]
+        if self.normalize:
+            print('Normalizing......')
+            psf_bb = normalization(psf_bb)
+            psf_rf = normalization(psf_rf)
+            speckle_bb = normalization(speckle_bb)
+            speckle_rf = normalization(speckle_rf)
+        # Standardize to zero mean and unit std
+        if self.standardize:
+            print('Standardizing......')
+            psf_bb = standardization(psf_bb)
+            psf_rf = standardization(psf_rf)
+            speckle_bb = standardization(speckle_bb)
+            speckle_rf = standardization(speckle_rf)
+        data_list = ['psf_bb.npy', 'psf_rf.npy', 'speckle_bb.npy', 'speckle_rf.npy']
+        # Save data in cache files
+        print('Saving ...')
+        for ii, data in enumerate((psf_bb, psf_rf, speckle_bb, speckle_rf)):
+            self.save_npy_file(data, self.cache_path, data_list[ii])
+        # Save data information
+        save_info({'k':self.k,'num_total':data_size[0]}, 'parameters.txt', self.cache_path) 
             
 
 class GetData(SaveAllData):
     '''
-    Divide data into training and testing sets.
-        function:
-            __call__: main function, return training pair. If forward is true, it also returns ideal psf sets.
-                     e.g. dataset = GetData(forward=False)
-                          (x_train, y_train), (x_test, y_test) = dataset()
-                     e.g. dataset = GetData(forward=True)
-                          (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test) = dataset()
-            get_data: return which data according to the input argument 'dtype'
+    Divide data into training, testing, and (validation) sets.
+    Note: Because forward network has almost no use. It would give rise to some errors when returninng data.
+    Args:
+        down_sample_factor: Int, downsampling factor along axial direction. For baseband data, due to the lower sampling
+        rate, this factor can be set as 2. It increase the interval along the depth direction. For RF data, it should be 1.
+        num_training: Int, number of training data + validation data
+        validation_split: float, from 0 to 1, ratio of validation set in num_training
+        complex_network: boolean, return radio-frequency or baseband data
+        forward: boolean, also return ideal PSFs
+        seed: int, random seed
+        shuffle_method: 'normal' or 'mix', suffle index method, if normal, it ensures the training and testing data are
+        independent. if mix, the training and testing data may has same properties such as frequency or scatterer, which
+        is determined by the input dataset.
+    Example:
+        Get my training pair of complex network
+        func = GetData(
+            down_sample_factor=2,
+            num_training=1800,
+            validation_split=0.05,
+            complex_network=True,
+            forward=False,
+            seed=7414,
+            shuffle_method='normal',
+            )
+        (x_train, y_train), (x_test, y_test), (x_val, y_val) = func()
+        
+        If you want to test in RF mode and without validation set
+        func = GetData(
+            down_sample_factor=1,
+            num_training=1800,
+            validation_split=0,
+            complex_network=False,
+            forward=False,
+            seed=7414,
+            shuffle_method='normal',
+            )
+        (x_train, y_train), (x_test, y_test), (x_val, y_val) = func()
+        
+        If you want to model learn the scatterer and frequency property
+        func = GetData(
+            down_sample_factor=2,
+            num_training=1800,
+            validation_split=0.05,
+            complex_network=True,
+            forward=False,
+            seed=7414,
+            shuffle_method='mix',
+            )
+        (x_train, y_train), (x_test, y_test), (x_val, y_val) = func()
+        
     '''
     def __init__(self,
-                 down_sample_factor=1,
+                 down_sample_factor=2,
                  num_training=1800,
-                 validation_split=0,
+                 validation_split=0.05,
                  complex_network=True,
                  forward=False,
                  seed=7414,
+                 shuffle_method='normal',
                  **kwargs):
         super().__init__(**kwargs)
         self.down_sample_factor = down_sample_factor # downsampling factor along axial direction
         self.num_training = num_training # number of training data + validation data
-        self.validation_split = validation_split
-        self.complex_network = complex_network # use RF or BB model
+        self.validation_split = validation_split # ratio of validation set in num_training
+        self.complex_network = complex_network # return radio-frequency or baseband data
         self.forward = forward # whether use forward path
         self.seed = seed # random seed
+        if shuffle_method not in {'normal', 'mix'}:
+            raise ValueError(f"Shuffle method can be 'normal' or 'mix' but get {shuffle_method}")
+        self.shuffle_method = shuffle_method
     
-        self.indices = np.arange(constant.DATASIZE[0]) # initialized indices 
-        self.dataset = None # a dictionary for training pair
-        self._recreate = False
+        self.shuffle = False
         
     def __call__(self):
         if self.num_training > constant.DATASIZE[0]:
             raise ValueError(f"Dataset only has {constant.DATASIZE[0]} samples but requires {self.num_training} training data")
-        print('Trying to check files ... \n ')
-        self.__sanitized()
-        if self._recreate:
-            self.info('w')
-            
-        # suffle indices
-        self.__shuffle_ind()
+
         # select rf or BB data
         if self.complex_network:
-            dtype = ['speckle_bb', 'psf_bb']
+            data_list = ['speckle_bb', 'psf_bb']
         else:
-            dtype = ['speckle_rf', 'psf_rf']
-        # build dictionary to search saving or saved name
-        if self.validation_split:
-            self.dataset = {
-                dtype[0]:['x_train', 'x_test', 'x_valid'],
-                dtype[1]:['y_train', 'y_test', 'y_valid']
+            data_list = ['speckle_rf', 'psf_rf']
+        try:
+            # check cache exists
+            x = self.read_npy_file(self.cache_path, data_list[0])
+            y = self.read_npy_file(self.cache_path, data_list[1])
+            self.dataset_size = {
+                'num_total':len(x),
+                'num_testing':len(x) - self.num_training
                 }
-
+            prepar = self.info('r') # previous saved parameters in parameter.txt
+        except FileNotFoundError:
+            print('Root file not found')
+            # if root cache hasn't been create, need to call SaveAllData
+            raise 
+        except Exception as e:
+            print(e)
+        try:
+            nowpar = self.info() # check parameter setting is matching
+            if len(prepar.keys()) != len(nowpar.keys()):
+                # recreate training/testing chache file
+                raise AssertionError('Parameter file is not compatible')
+            for key in prepar.keys():
+                if prepar[key] != nowpar[key]:
+                    if key in {'k','num_total', 'cache_path', 'load_path'}:
+                        raise ValueError
+                    else:
+                        # recreate training/testing chache file
+                        raise AssertionError
+            return self.read_cache_file()
+            
+        except FileNotFoundError:
+            print('Cache file not found')
+            # create training/testing chache file
+            pass
+        except AssertionError:
+            print('Parameter file is not compatible, cache file need to be recreated')
+            # create training/testing chache file
+            pass
+        except ValueError:
+            # recreate root chache file
+            print('Root file requires to recreate')
+            raise
+        except Exception as e:
+            print(e)
+        return self.create_cache_file(x, y)
+    
+    def read_cache_file(self):
+        print('Reading cache ...')
+        x_train = self.read_npy_file(self.cache_path, 'x_train')
+        x_test = self.read_npy_file(self.cache_path, 'x_test')
+        y_train = self.read_npy_file(self.cache_path, 'y_train')
+        y_test = self.read_npy_file(self.cache_path, 'y_test')
+        if self.validation_split > 0:
+            x_val = self.read_npy_file(self.cache_path, 'x_val')
+            y_val = self.read_npy_file(self.cache_path, 'y_val')
+            if self.forward:
+                ideal_train = self.read_npy_file(self.cache_path, 'ideal_train')
+                ideal_test = self.read_npy_file(self.cache_path, 'ideal_test')
+                ideal_val = self.read_npy_file(self.cache_path, 'ideal_val')
+                return (x_train, y_train), (x_test, y_test), (x_val, y_val), (ideal_train, ideal_test, ideal_val)
+            else:
+                return (x_train, y_train), (x_test, y_test), (x_val, y_val)
         else:
-            self.dataset = {
-                dtype[0]:['x_train', 'x_test'],
-                dtype[1]:['y_train', 'y_test']
-                }
-        
-        x_train, x_test, *x_valid = self.get_data(dtype[0])
-        y_train, y_test, *y_valid = self.get_data(dtype[1])
+            if self.forward:
+                ideal_train = self.read_npy_file(self.cache_path, 'ideal_train')
+                ideal_test = self.read_npy_file(self.cache_path, 'ideal_test')
+                return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
+            else:
+                return (x_train, y_train), (x_test, y_test)
 
-        if self.forward:   
-            self.dataset['ideal_psf'] = ['ideal_train', 'ideal_test']   
-            ideal_train, ideal_test = self.get_data('ideal_psf')
-            return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
+    def create_cache_file(self, x, y):
+        print('Creating cache file ...')
+        x = downsampling(x, self.down_sample_factor, 'axial')
+        y = downsampling(y, self.down_sample_factor, 'axial')
+        if self.forward:
+            if self.k == 4:
+                ideal_psfs = y[::4]
+                ideal_psfs = np.repeat(ideal_psfs, 4, axis=0) # replicate by 4 times
+            else:
+                raise ValueError(f"Obtain idea PSF only support for k = 4, but get k ={self.k}")
+        self.indices = np.arange(len(x))
+        self.info('w')
+        x_train = x[self.get_ind('train')]
+        y_train = y[self.get_ind('train')]
+        x_test = x[self.get_ind('test')]
+        y_test = y[self.get_ind('test')]
+        self.save_npy_file(x_train, self.cache_path, 'x_train')
+        self.save_npy_file(y_train, self.cache_path, 'y_train')
+        self.save_npy_file(x_test, self.cache_path, 'x_test')
+        self.save_npy_file(y_test, self.cache_path, 'y_test')
+        if self.validation_split > 0:
+            x_val = x[self.get_ind('val')]
+            y_val = y[self.get_ind('val')]
+            self.save_npy_file(x_val, self.cache_path, 'x_val')
+            self.save_npy_file(y_val, self.cache_path, 'y_val')
+            if self.forward:
+                ideal_train = ideal_psfs[self.get_ind('train')]
+                ideal_test = ideal_psfs[self.get_ind('test')]
+                ideal_val = ideal_psfs[self.get_ind('val')]
+                self.save_npy_file(ideal_train, self.cache_path, 'ideal_train')
+                self.save_npy_file(ideal_test, self.cache_path, 'ideal_test')
+                self.save_npy_file(ideal_val, self.cache_path, 'ideal_val')
+                return (x_train, y_train), (x_test, y_test), (x_val, y_val), (ideal_train, ideal_test, ideal_val)
+            else:
+                return (x_train, y_train), (x_test, y_test), (x_val, y_val)
         else:
-            if self.validation_split:
-                return (x_train, y_train), (x_test, y_test), (x_valid[0], y_valid[0])
+            if self.forward:
+                ideal_train = ideal_psfs[self.get_ind('train')]
+                ideal_test = ideal_psfs[self.get_ind('test')]
+                self.save_npy_file(ideal_train, self.cache_path, 'ideal_train')
+                self.save_npy_file(ideal_test, self.cache_path, 'ideal_test')
+                return (x_train, y_train), (x_test, y_test), (ideal_train, ideal_test)
             else:
                 return (x_train, y_train), (x_test, y_test)
         
-    def get_data(self, dtype):
-        '''
-        Parameters
-        ----------
-        dtype : str, image type
-            It can be 'speckle_bb', 'psf_bb', 'ideal_psf' or 'speckle_rf', 'psf_rf', 'ideal_psf'.
-
-        Returns
-        -------
-        numpy.array: 
-            training data, testing data
-        '''
-        try:
-            if self._recreate:
-                # recreate cache file
-                print(f"{dtype} file is creating ...")
-                if dtype in {'ideal_psf'}:
-                    if self.complex_network:
-                        return self.__slice_dataset('psf_bb', ideal=True)
-                    else:
-                        return self.__slice_dataset('psf_rf', ideal=True)
-                else:
-                    return self.__slice_dataset(dtype)
-            # not require to recreate file -> read cache file
-            else:
-                if self.validation_split:
-                    return self.__read_cache(self.dataset[dtype][0]), self.__read_cache(self.dataset[dtype][1]), self.__read_cache(self.dataset[dtype][2])
-                else:
-                    return self.__read_cache(self.dataset[dtype][0]), self.__read_cache(self.dataset[dtype][1])
-        except FileNotFoundError:
-            print(f"File is not found, trying to recreate {dtype} file")
-            if dtype in {'ideal_psf'}:
-                if self.complex_network:
-                    return self.__slice_dataset('psf_bb', ideal=True)
-                else:
-                    return self.__slice_dataset('psf_rf', ideal=True)
-            else:
-                return self.__slice_dataset(dtype)
-        
-    def __sanitized(self):
-        prepar = self.info('r') # if not found -> raise FileNotFoundError -> recreate root file
-        nowpar = self.info()
-        if len(prepar.keys()) != len(nowpar.keys()):
-            # only root file has created -> create sub file
-            self._recreate = True
-        for key in prepar.keys():
-            if prepar[key] != nowpar[key]:
-                if key in {'k','num_total', 'saved_cache_path', 'load_path'}:
-                    raise ValueError('Root file requires to recreate')
-                else:
-                    # recreate sub file
-                    self._recreate = True
-        
-    def get_indices(self, key):
-        if key == 'train':
-            return self.indices[0]
-        elif key == 'test':
-            return self.indices[1]
-        elif key == 'valid':
-            return self.indices[2]
-        else:
-            raise ValueError(f"Input argument can only be 'train', 'test', or 'valid' but get {key}")
-
-    
-    def find_level_and_ind(self, ind=None, train=True):
-        '''
-        Get phase aberration level according to the index. If index is None, this function returns the whole
-        indices.
-            Args:
-                ind: int or None, the i-th data or whole dataset.
-                train: boolean, this index is from training data or testing data.
-        '''
-        level = np.arange(constant.k) + 1 # convert range from [0,k-1] to [1,k].
-        level = np.tile(level, constant.DATASIZE[0]//constant.k)
-
-
-        if train:
-            train_indices = self.get_indices('train')
-            level_of_train = level[train_indices]
-            if ind is None:
-                return level_of_train, train_indices
-            else:
-                return level_of_train[ind], train_indices[ind]
-        else:
-            test_indices = self.get_indices('test')
-            level_of_test = level[test_indices]
-            if ind is None:
-                return level_of_test, test_indices
-            else:
-                return level_of_test[ind], test_indices[ind]
-        
-    def info(self, op=None):
-        '''
-        Input arguments setting
-        '''
-        file_name = 'parameters.txt'
-        training_data_shape = self.training_data_shape()
-        saved_var = {
-            'k':constant.k,
-            'validation_split':self.validation_split,
-            'num_total':constant.DATASIZE[0],
-            'num_training':training_data_shape[0],
-            'num_testing':constant.DATASIZE[0] - self.num_training,
-            'num_valid':self.num_training - training_data_shape[0],
-            'down_sample_factor':self.down_sample_factor,
-            'complex_network':self.complex_network,
-            'forward':self.forward,
-            'seed':self.seed,
-            'saved_cache_path':self.saved_cache_path,
-            'load_path':self.load_path
-            }
-        if op is None:
-            return saved_var
-        elif op == 'r':
-            return read_info(file_name, self.saved_cache_path)
-        elif op == 'w':
-            save_info(saved_var, file_name, self.saved_cache_path)
-        else:
-            raise ValueError("Expected 'r', 'w', and NoneType for reading, writing and getting information.")
-            
-            
-    def __shuffle_ind(self):
+    def shuffle_ind(self):
         '''
         Randomly suffle data indices.
         '''
         rng = np.random.default_rng(self.seed)
+        if self.shuffle_method == 'mix':
+            # mix the training and testing data, i.e. model potentially learn the testing data
+            rng.shuffle(self.indices)
         num_valid = round(self.num_training*self.validation_split)
         train_indices = self.indices[:self.num_training-num_valid]
         test_indices = self.indices[self.num_training:]
-        rng.shuffle(train_indices)
-        rng.shuffle(test_indices)
-        if self.validation_split:
+        if self.shuffle_method == 'normal':
+            # You should use this way
+            rng.shuffle(train_indices)
+            rng.shuffle(test_indices)
+        # num_training = # of training data + # of validation data
+        # |training data|validation data|testing data|
+        if self.validation_split > 0:
             valid_indices = self.indices[self.num_training-num_valid:self.num_training]
             rng.shuffle(valid_indices)
             self.indices = (train_indices, test_indices, valid_indices)
         else:
             self.indices = (train_indices, test_indices)
-    
-    def __slice_dataset(self, dtype, ideal=False):
-        '''
-        Parameters
-        ----------
-        dtype : str, sliced image type
-            It can be 'speckle_bb', 'psf_bb' or 'speckle_rf', 'psf_rf'.
-        ideal : boolean, whether ideal PSF is required.
-
-        '''
-        path = os.path.join(self.saved_cache_path, dtype+'.npy') # read cache file saved from the parent class.
-        # load data saved by Preprocessing(), if the data size is odd, the first column or row is removed.
-        data = np.load(path)[:, constant.DATASIZE[1]%2:, constant.DATASIZE[2]%2:, :]
-        # decimation
-        if self.down_sample_factor:
-            data = downsampling(data, self.down_sample_factor, 'axial')
-        if ideal:
-            if constant.k == 4:
-                ideal_psf = data[::4] 
-                data = np.repeat(ideal_psf, 4, axis=0) # replicate by 4 times
-                assert data.shape[0] == constant.DATASIZE[0]
-                assert (data[0] == data[3]).all()
-                dtype = 'ideal_psf'
-            else:
-                raise ValueError(f"Obtain idea PSF only support for k = 4, but get k ={constant.k}")
-        train_indices, test_indices, *valid_indices = self.indices # random shuffle
+        self.shuffle = True
         
-        train = data[train_indices]
-        self.__save_cache(train, self.dataset[dtype][0]) 
-        test = data[test_indices]
-        self.__save_cache(test, self.dataset[dtype][1])
-        assert train.shape == self.training_data_shape(), 'Training data size is wrong.'
-        if self.validation_split:
-            valid_indices = valid_indices[0]
-            valid = data[valid_indices]
-            self.__save_cache(valid, self.dataset[dtype][2])
-            return train, test, valid
+    def get_ind(self, key):
+        if not self.shuffle:
+            self.shuffle_ind()
+            self.shuffle = True 
+        if key == 'train':
+            return self.indices[0]
+        elif key == 'test':
+            return self.indices[1]
+        elif key == 'val':
+            return self.indices[2]
         else:
-            return train, test
-    
+            raise ValueError(f"Input argument can only be 'train', 'test', or 'val' but get {key}")
 
-    def __save_cache(self, x, name):
+    def find_level_and_ind(self, key, ind=None):
         '''
-        Save training pairs.
+        Get phase aberration level according to the index. If index is None, this function returns the whole
+        indices.
+            Args:
+                key: 'train','test', or 'val'. Want to get training, testing or validation's indices.
+                ind: int or None, the i-th data or whole dataset.
+
         '''
-        assert isinstance(name, str)
-        print(f'Saving {name} ... ')
-        np.save(os.path.join(self.saved_cache_path, name + '.npy'), x)
-    
-    def __read_cache(self, name):
-        assert isinstance(name, str)
-        print(f'Reading {name} ... ')
-        return np.load(os.path.join(self.saved_cache_path, name + '.npy'))
-            
-    
-    def training_data_shape(self):
-        output_shape = (round(self.num_training*(1-self.validation_split)),) + \
-            ((constant.DATASIZE[1]-constant.DATASIZE[1]%2)//self.down_sample_factor,) + \
-                (constant.DATASIZE[1]-constant.DATASIZE[1]%2,)
-        if self.complex_network:
-            return output_shape + (2,)
+        if key not in {'train', 'test','val'}:
+            raise ValueError(f"Key should be 'train', 'test' or 'val', but get {key}")
+        level = np.arange(self.k) + 1 # convert range from [0,k-1] to [1,k].
+        level = np.tile(level, constant.DATASIZE[0]//self.k)
+        indices = self.get_ind(key)
+        if ind is None:
+            return level[indices], indices
         else:
-            return output_shape + (1,)
+            indth_level = level[indices]
+            return indth_level[ind], indices[ind]
+
+        
+    def info(self, op=None):
+        '''
+        Input arguments setting
+        Arg:
+            op:None,'r',or 'w'. if None, return the whole dictionary of parameters. if 'r', read the saved
+            file parameters.txt. If 'w', write parameters into parameters.txt.
+        '''
+        file_name = 'parameters.txt'
+        saved_var = {
+            'k':self.k,
+            'validation_split':self.validation_split,
+            'num_total':self.dataset_size['num_total'],
+            'num_training':round(self.num_training*(1-self.validation_split)),
+            'num_testing':self.dataset_size['num_testing'],
+            'num_valid':round(self.num_training*self.validation_split),
+            'down_sample_factor':self.down_sample_factor,
+            'complex_network':self.complex_network,
+            'forward':self.forward,
+            'seed':self.seed,
+            'cache_path':self.cache_path,
+            'load_path':self.dataset_path,
+            'shuffle_method':self.shuffle_method
+            }
+        if op is None:
+            return saved_var
+        elif op == 'r':
+            return read_info(file_name, self.cache_path)
+        elif op == 'w':
+            save_info(saved_var, file_name, self.cache_path)
+        else:
+            raise ValueError("Expected 'r', 'w', and NoneType for reading, writing and getting information.")
+
         
     # def get_ideal(self):
     #     speckle_path = os.path.join(self.DIRECTORY, 'speckle_bb.npy')
