@@ -127,11 +127,13 @@ class SaveAllData(BaseProcess):
     '''
     
     def __init__(self,
+                 num_required_data=None,
                  k=4,
                  dataset_path=r'./MatlabCheck/simulation_data2',
                  cache_path=r'./parameters',
                  normalize=True,
                  standardize=False):
+        self.num_required_data = num_required_data # how many data would be used
         self.k = k # k-kind of phase aberration or speed of sound
         self.dataset_path = dataset_path # path of simulation data
         self.cache_path = cache_path # path of saved data in npy format
@@ -143,6 +145,10 @@ class SaveAllData(BaseProcess):
         # Check data size
         self.check_datasize(self.dataset_path)
         data_size = self.get_dataset_size(self.dataset_path)
+        if self.num_required_data is not None:
+            data_size = list(data_size)
+            data_size[0] = self.num_required_data
+            data_size = tuple(data_size)
         psf_bb = np.zeros(data_size, dtype=complex)
         psf_rf = np.zeros(data_size)
         speckle_bb = np.zeros(data_size,dtype=complex)
@@ -152,12 +158,14 @@ class SaveAllData(BaseProcess):
         for name in file_name:
             # contain mat and figure files
             if name.endswith('.mat'):
-                count = count + 1
                 # split the i-th level-j PSF 
                 ind = np.array(name.split('.')[0].split('_'))[np.char.isnumeric(name.split('.')[0].split('_'))]
                 # convert to index
                 ind = self.k*(int(ind[0])-1) + int(ind[1]) - 1 
                 # Note: because name in file_name is not in the order what we want
+                if ind >= self.num_required_data:
+                    continue
+                count = count + 1
                 file_path = os.path.join(self.dataset_path, name)
                 data = io.loadmat(file_path)
                 psf_bb[ind,:,:] = data.get('psf_bb')
@@ -285,6 +293,8 @@ class GetData(SaveAllData):
             # check cache exists
             x = self.read_npy_file(self.cache_path, data_list[0])
             y = self.read_npy_file(self.cache_path, data_list[1])
+            x = x[:,1:,1:,:]
+            y = y[:,1:,1:,:]
             self.dataset_size = {
                 'num_total':len(x),
                 'num_testing':len(x) - self.num_training
@@ -332,9 +342,11 @@ class GetData(SaveAllData):
         x_test = self.read_npy_file(self.cache_path, 'x_test')
         y_train = self.read_npy_file(self.cache_path, 'y_train')
         y_test = self.read_npy_file(self.cache_path, 'y_test')
+
         if self.validation_split > 0:
             x_val = self.read_npy_file(self.cache_path, 'x_val')
             y_val = self.read_npy_file(self.cache_path, 'y_val')
+            self.indices = np.arange(len(x_train)+len(x_test)+len(x_val))
             if self.forward:
                 ideal_train = self.read_npy_file(self.cache_path, 'ideal_train')
                 ideal_test = self.read_npy_file(self.cache_path, 'ideal_test')
@@ -343,6 +355,7 @@ class GetData(SaveAllData):
             else:
                 return (x_train, y_train), (x_test, y_test), (x_val, y_val)
         else:
+            self.indices = np.arange(len(x_train)+len(x_test))
             if self.forward:
                 ideal_train = self.read_npy_file(self.cache_path, 'ideal_train')
                 ideal_test = self.read_npy_file(self.cache_path, 'ideal_test')
@@ -403,18 +416,23 @@ class GetData(SaveAllData):
         if self.shuffle_method == 'mix':
             # mix the training and testing data, i.e. model potentially learn the testing data
             rng.shuffle(self.indices)
-        num_valid = round(self.num_training*self.validation_split)
-        train_indices = self.indices[:self.num_training-num_valid]
         test_indices = self.indices[self.num_training:]
+        if self.validation_split > 0:
+            # num_training = # of training data + # of validation data
+            # |training data|validation data|testing data|
+            num_valid = round(self.num_training*self.validation_split)
+            train_indices = self.indices[:self.num_training-num_valid]
+            valid_indices = self.indices[self.num_training-num_valid:self.num_training]
+        else:
+            train_indices = self.indices[:self.num_training]
+        
         if self.shuffle_method == 'normal':
             # You should use this way
             rng.shuffle(train_indices)
             rng.shuffle(test_indices)
-        # num_training = # of training data + # of validation data
-        # |training data|validation data|testing data|
+            if self.validation_split > 0:
+                rng.shuffle(valid_indices)
         if self.validation_split > 0:
-            valid_indices = self.indices[self.num_training-num_valid:self.num_training]
-            rng.shuffle(valid_indices)
             self.indices = (train_indices, test_indices, valid_indices)
         else:
             self.indices = (train_indices, test_indices)
