@@ -15,10 +15,12 @@ if __name__ == '__main__':
         sys.path.append(addpath)
     from baseband.utils import data_utils
     from baseband.setting import constant
+    from baseband.arc.model_utils import ComplexConcatenate, ComplexNormalization, CosineDecay
     sys.path.remove(addpath)
 else:
     from . import data_utils
     from ..setting import constant
+    from ..arc.model_utils import ComplexConcatenate, ComplexNormalization, CosineDecay
 import numpy as np
 from scipy    import io
 import complexnn 
@@ -33,7 +35,10 @@ def get_custom_object():
         'MaxUnpooling2D':complexnn.pool_test.MaxUnpooling2D,
         'ComplexMSE':complexnn.loss.ComplexMSE,
         'ctanh':complexnn.activation.ctanh,
-        'FLeakyReLU': complexnn.activation.FLeakyReLU
+        'FLeakyReLU': complexnn.activation.FLeakyReLU,
+        'ComplexConcatenate': ComplexConcatenate,
+        'ComplexNormalization': ComplexNormalization,
+        'CosineDecay': CosineDecay
         }
     return custom_object
 
@@ -241,21 +246,18 @@ def save_model(model, history, name):
     # plot and save model architecture
     tf.keras.utils.plot_model(model, to_file=model_figpath, show_shapes=True, show_layer_names=True, dpi=900)
     model.save(model_saved_path)
+    model.save(os.path.join(saved_dir, name), save_format='tf')
     history_name = os.path.join(saved_dir, name + 'history.txt') # loss value per epoch
     with open(history_name, 'w') as f:
         f.write(str(history))
     plt.figure()
-    plt.plot(history['loss'], label='training loss')
-    try:
-        plt.plot(history['val_loss'], label='val loss')    
-    except KeyError:
-        print('No validation')
-    finally:
-        plt.legend()
-        plt.xlabel('epochs')
-        plt.ylabel('loss')
-        plt.savefig(os.path.join(saved_dir,name+'.png'))
-        plt.show()
+    for key in history.keys():
+        plt.plot(history[key], label=key)
+    plt.legend()
+    plt.xlabel('epochs')
+    plt.ylabel('loss')
+    plt.savefig(os.path.join(saved_dir,name+'.png'))
+    plt.show()
 
 def progressbar(count, total, name):
     totalbar = 20
