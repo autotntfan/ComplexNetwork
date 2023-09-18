@@ -12,12 +12,12 @@ if __name__ == '__main__':
     addpath = os.path.dirname(os.path.dirname(currentpath))
     if addpath not in sys.path:
         sys.path.append(addpath)
-    from baseband.utils.data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing
+    from baseband.utils.data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing, bb2rf1D
     from baseband.utils.info import get_delaycurve
     from baseband.setting import constant
     sys.path.remove(addpath)
 else:
-    from .data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing
+    from .data_utils import angle, projection, envelope_detection, split_complex, normalization, focusing, bb2rf1D
     from .info import get_delaycurve
     from ..setting import constant
 import cv2    
@@ -31,6 +31,7 @@ def complex_diff(signal1, signal2, normalize=True):
         Args:
             signal1: Numpy array.
             signal2: Numpy array, reference signal.
+            normalize: Boolean, whether to use normalization.
         Returns:
             Numpy array,
             real-part difference, imag-part difference
@@ -93,24 +94,25 @@ def IOU(signal1, signal2, DR=60, gain=0, gap=20):
         signal1: Numpy array with shape [N,H,W,C] or [H,W,C]
         signal2: Numpy array with shape [N,H,W,C] or [H,W,C]
         gain: scalar, image displayed gain
-        gap: scalar, interval of dynamic range 
+        gap: scalar, 
         
     Returns:
-        iou_value: M-by-N ndarray, where DR is divided into M intervals and there are N signals in signal1 array 
-            e.g. DR=60, gain=0, gap=20, include <-60dB, -60~-40dB, -40dB~-20dB, -20dB~0dB (M=4)
-            e.g. DR=70, gain=0, gap=20, included <-70, -70~-50, -50~-30, -30~-10, -10~0 dB. (M=5)
-            Note M = DR//gap + 1 if DR%gap is 0, otherwise M = DR//gap + 2 (i.e. -10~0 dB for DR=70)
-        DRs: list, sequence of dynamic range interval, e.g. [-60,-40,-20,0]
+        iou: ndarray, 
+            M-by-N ndarray, where DR is divided into M intervals, e.g. DR=70, M=5, included
+            ~0, 0~20, 20~40, 40~60, 60~70 dB.Each column contains M samples' IOU value during 
+            specific range. Total N signals. Note that
+            M = DR//gap + 1 if DR%gap is 0, otherwise M = DR//gap + 2 (i.e. 60~70 dB)
+        DRs: list, dynamic range interval
         mask1: boolean ndarray with shape [M,N,H,W]. Binary mask of signal1 in each dynamic range interval
         mask2: boolean ndarray with shape [M,N,H,W]. Binary mask of signal2 in each dynamic range interval
         
     '''
     if signal1.shape != signal2.shape:
-        raise ValueError('Inputs are of different size')
+        raise ValueError('Inputs are different size')
     axis = (1,2) if signal1.ndim == 4 else None # summation along which axes
     DRs = [gaingap for gaingap in range(gain-DR, gain, gap)] + [gain] 
-    signal1 = envelope_detection(signal1, gain) # get log-scale data
-    signal2 = envelope_detection(signal2, gain) # get log-scale data
+    signal1 = envelope_detection(signal1, gain)
+    signal2 = envelope_detection(signal2, gain)
     mask1 = np.zeros((len(DRs),) + signal1.shape)
     mask2 = np.zeros((len(DRs),) + signal1.shape)
     for ii, DRrange in enumerate(DRs):
@@ -125,8 +127,7 @@ def IOU(signal1, signal2, DR=60, gain=0, gap=20):
             mask1[ii] = R1
             mask2[ii] = R2
             iou = np.vstack([iou,np.sum(np.logical_and(R1, R2), axis=axis)/np.sum(np.logical_or(R1, R2), axis=axis)])
-    iou_value = np.nan_to_num(iou,nan=0.0)
-    return iou_value, DRs, mask1, mask2
+    return np.nan_to_num(iou,nan=0.0), DRs, mask1, mask2
 
 def pulse_estimate(RFdata, Nc):
     N, H, W, C = RFdata.shape
@@ -138,6 +139,34 @@ def pulse_estimate(RFdata, Nc):
     pulse = np.real(np.fft.ifft(np.exp(np.fft.fft(cepstrum, axis=1)), axis=1))
     pulse = pulse/np.max(np.abs(pulse), axis=(1,2), keepdims=True)
     return pulse
+
+def mainlobe_pulse_diff(pred_bb_psf, ref_bb_psf, inds, return_aline=False):
+    '''
+    This function is used to calculate the central RF pulse difference btw prediction and reference.
+    The central RF pulse is the central aline of the PSF where the mainlobe locates.
+    Args:
+        pred_bb_psf: Numpy array with shape [N,H,W,C], predicted baseband PSF.
+        ref_bb_psf: Numpy array with shape [N,H,W,C], reference baseband PSF.
+        inds: vector, indices of signal.
+        return_aline: Boolean, whether to return the mainlobe pulse of prediction and reference.
+    Return:
+        pulse difference (and mainlobe pulse of prediction and reference).
+    '''
+    assert pred_bb_psf.shape == ref_bb_psf.shape
+    N, H, W, C = pred_bb_psf.shape
+    pred_bb_mainlobe_aline = pred_bb_psf[:,:,W//2,:]
+    ref_bb_mainlobe_aline = ref_bb_psf[:,:,W//2,:]
+    rf_pred_mainlobe_aline = bb2rf1D(pred_bb_mainlobe_aline, inds)
+    rf_ref_mainlobe_aline = bb2rf1D(ref_bb_mainlobe_aline, inds)
+    rf_pred_mainlobe_aline = rf_pred_mainlobe_aline[:,H//3:2*H//3,:]
+    rf_ref_mainlobe_aline = rf_ref_mainlobe_aline[:,H//3:2*H//3,:]
+    pulse_diff = np.sum((rf_pred_mainlobe_aline - rf_ref_mainlobe_aline)**2, axis=(1,2))
+    if return_aline:
+        return pulse_diff, rf_pred_mainlobe_aline, rf_ref_mainlobe_aline
+    else:
+        return pulse_diff
+    
+    
 
 def mse(signal1, signal2, focus=False, envelope=False, avg=True):
     kwargs = {
@@ -207,7 +236,32 @@ def ssim_map(signal1, signal2, max_val=2, filter_size=15, filter_sigma=1.5, k1=0
     mssim = np.mean(ssim_map)
     return mssim,np.squeeze(ssim_map)
 
-def save_metrics(signal1, signal2, levels, model_name):
+
+def tf_ssim_map(signal1, signal2, max_val=2, filter_size=15, filter_sigma=1.5, k1=0.01, k2=0.03):
+    assert signal1.shape == signal2.shape
+    kernelX = cv2.getGaussianKernel(filter_size, filter_sigma)
+    window = np.rot90(kernelX * kernelX.T,2)
+    window = window.reshape(filter_size,filter_size,1,1)
+    C1 = (k1*max_val)**2
+    C2 = (k2*max_val)**2
+    ithchannel = 0
+    N,H,W,C = signal1.shape
+    ssimmap = tf.zeros(N,H-filter_size+1,W-filter_size+1,C)
+    while ithchannel < C:
+        mu1 = tf.nn.conv2d(signal1[:,:,:,ithchannel:ithchannel+1], window, 1, 'VALID')
+        mu2 = tf.nn.conv2d(signal2[:,:,:,ithchannel], window, 1, 'VALID')
+        mu1_mu2 = tf.multiply(mu1,mu2)
+        mu1_sq = tf.multiply(mu1,mu1)
+        mu2_sq = tf.multiply(mu2,mu2)
+        sigma1_sq = tf.subtract(tf.nn.conv2d(tf.multiply(signal1[:,:,:,ithchannel],signal1),window[:,:,:,ithchannel], 1, 'VALID'),mu1_sq)
+        sigma2_sq = tf.subtract(tf.nn.conv2d(tf.multiply(signal2[:,:,:,ithchannel],signal2[:,:,:,ithchannel]),window, 1, 'VALID'),mu2_sq)
+        sigma12 = tf.subtract(tf.nn.conv2d(tf.multiply(signal1[:,:,:,ithchannel],signal2[:,:,:,ithchannel]),window, 1, 'VALID'),mu1_mu2)
+        ssimmap[:,:,:,ithchannel] = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
+        ithchannel = ithchannel + 1
+    meanssim = tf.reduce_mean(ssimmap)
+    return meanssim, ssimmap
+
+def save_metrics(signal1, signal2, inds, levels, model_name):
     save_dir = os.path.join(constant.MODELPATH, model_name)
     file_name = os.path.join(save_dir, model_name + '_metrics.txt')
     focus = [False, False, True, True]
@@ -224,7 +278,7 @@ def save_metrics(signal1, signal2, levels, model_name):
         f.write("\n Ratios of IOU larger than 0.5 \n" +  str(df_ratio) + "\n")
         f.write("\n IOU \n" + str(df_scores) + "\n")
         f.write("\n Beam pattern projection difference \n" + str(leveln_BPD_metric(signal1, signal2, levels)) + "\n")
-        
+        f.write("\n RF Mainlobe pulse difference \n" + str(leveln_pulse_diff_metric(signal1, signal2, inds, levels)) + "\n")
             
 def __preprocessing(signal1, signal2, focus=False, envelope=False):
     if focus:
@@ -298,10 +352,10 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         delay[ii] = get_delaycurve(inds[ii])
     real_diff, imag_diff = complex_diff(signal1, signal2, normalize)
     err_2channel = {
-        'level':np.tile(levels,2), # levels of real and imaginary part
+        'Level':np.tile(levels,2), # levels of real and imaginary part
         'maxerr':np.hstack([np.max(real_diff,axis=(1,2,3)),np.max(imag_diff,axis=(1,2,3))]), # max L1 norm of Re and Im channel for each signal
         'sumerr':np.hstack([np.sum(real_diff,axis=(1,2,3)),np.sum(imag_diff,axis=(1,2,3))]), # sum L1 norm of Re and Im channel for each signal
-        'channel':np.asarray(['real']*(ii+1) + ['imag']*(ii+1)),
+        'Channel':np.asarray(['Real']*(ii+1) + ['Imag.']*(ii+1)),
         'ind':np.tile(inds,2) # index of signal
         }
     err = {
@@ -309,7 +363,8 @@ def err_statistic(signal1, signal2, levels, inds, *args, normalize=True, **kwarg
         'sumerr':np.sum(np.sqrt(real_diff**2 + real_diff**2),axis=(1,2,3)), # sum L2 norm for each signal
         'LBPD':BPD(signal1, signal2, direction='lateral', *args, **kwargs), 
         'ABPD':BPD(signal1, signal2, direction='axial', *args, **kwargs),
-        'level':levels,
+        'pulsediff':mainlobe_pulse_diff(normalization(signal1), signal2, inds, False),
+        'Level':levels,
         'ind':inds
         }
     delay = {
@@ -410,7 +465,20 @@ def leveln_IOU_metric(pred, ref, levels, threshold=0.5, **kwargs):
     return df_scores, df_ratio
 
         
-
+def leveln_pulse_diff_metric(pred, ref, inds, levels):
+    pred = normalization(pred)
+    ref = normalization(ref)
+    pulse_diff = mainlobe_pulse_diff(pred, ref, inds)
+    level_len = len(np.unique(levels))
+    data_pulse_diff = []
+    for level in range(1,level_len+1):
+        leveln_pulse_diff = pulse_diff[levels==level]
+        data_pulse_diff.append(str(np.round(np.mean(leveln_pulse_diff),2)) + chr(177) + str(np.round(np.std(leveln_pulse_diff),2)))
+    column = ['level-'+str(ii+1) for ii in range(level_len)]
+    df = pd.DataFrame(columns=column)
+    df.loc['Pulse difference'] = data_pulse_diff
+    return df
+        
 
     
 
