@@ -19,13 +19,13 @@ if __name__ == '__main__':
     from baseband.setting import constant
     from baseband.utils.data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from baseband.utils.info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
-    from baseband.utils.analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU
+    from baseband.utils.analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU, mainlobe_pulse_diff
     sys.path.remove(addpath)
 else:
     from ..setting import constant
     from .data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from .info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
-    from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU
+    from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU, mainlobe_pulse_diff
 
 # ------------------------- basic figure -------------------------
 def save_fig(model_name=None, saved_name=None, saved_dir=None, fig=None):
@@ -76,7 +76,6 @@ def gray(img, DR=60, gain=None, axis=None, title_name=None, show=True, *args, **
             
     '''
     img = reduce_dim(img) # reshape to [H,W]
-    plt.figure()
     if gain is not None:
         plt.imshow(img, cmap='gray', vmin=gain-DR, vmax=gain, extent=axis, aspect='auto')
     else:
@@ -117,7 +116,7 @@ def heatmap(img, axis=None, title_name=None, show=True, *args, **kwargs):
     plt.show() if show else plt.close('all')
 
 
-def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, *args, **kwargs):
+def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, y_label=None, *args, **kwargs):
     '''
     Show box plot.
         Args:
@@ -137,6 +136,9 @@ def boxplot(data, xlabel, ylabel, hue=None, title_name=None, show=True, *args, *
     sns.boxplot(data=data, x=xlabel, y=ylabel, hue=hue)
     if title_name is not None:
         plt.title(title_name)
+    plt.xlabel('Level')
+    if y_label is not None:
+        plt.ylabel(y_label)
     save_fig(*args, **kwargs)
     plt.show() if show else plt.close('all')
 
@@ -171,6 +173,39 @@ def envelope_fig(img,
     img = envelope_detection(img, gain)
     img = reduce_dim(img)
     gray(img, DR, gain, axis, title_name, show, *args, saved_name=saved_name, **kwargs)
+    
+def envelope_fig2(imgs,
+                  DR=60,
+                  gain=0,
+                  title_names='Bmode',
+                  ind=None,
+                  saved_name='Bmode',
+                  show=True,
+                  *args,
+                  **kwargs):
+    plt.figure()
+    
+    for ii,img in enumerate(imgs):
+        plt.subplot(1,2,ii+1)
+        axis = None if ind is None else get_axis(img, ind)
+        if ind is not None:    
+            level = get_level(ind)
+            saved_name = saved_name + '_L' + str(level)
+            title_name = title_names[ii] + '_L' + str(level)
+        img = envelope_detection(img, gain)
+        img = reduce_dim(img)
+        if gain is not None:
+            plt.imshow(img, cmap='gray', vmin=gain-DR, vmax=gain, extent=axis, aspect='auto')
+        else:
+            plt.imshow(img, cmap='gray', vmin=-DR, vmax=0, extent=axis, aspect='auto')
+        if title_names is not None:
+            plt.title(title_name)
+        plt.colorbar()
+    plt.tight_layout()
+    save_fig(*args, saved_name=saved_name, **kwargs)
+    plt.show() if show else plt.close('all')
+        
+    
     
 def fft_fig(signal, ind, Aline=False, saved_name='Spectrum', model_name=None, show=True):
     '''
@@ -303,9 +338,9 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         fig2, ax2 = plt.subplots(1,1)
         fig3, ax3 = plt.subplots(1,1)
         for level in range(1,constant.k+1):
-            level_n_mse = err['sumerr'][err['level'] == level]
-            level_n_LBPD = err['LBPD'][err['level'] == level]
-            level_n_ABPD = err['ABPD'][err['level'] == level]
+            level_n_mse = err['sumerr'][err['Level'] == level]
+            level_n_LBPD = err['LBPD'][err['Level'] == level]
+            level_n_ABPD = err['ABPD'][err['Level'] == level]
             end = start + level_n_mse.shape[0] # start level-n index
             # fig1
             ax1.plot(np.arange(start,end), level_n_mse, constant.COLORSHIT[level-1])
@@ -320,15 +355,15 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
             
         ax1.set_title('Error summation')
         ax1.set_xlabel('Sample')
-        ax1.set_ylabel('Error')
+        ax1.set_ylabel('Intensity')
         
         ax2.set_title('LBPD difference')
         ax2.set_xlabel('Sample')
-        ax2.set_ylabel('LBPD')
+        ax2.set_ylabel('Normalized intensity (dB)')
         
         ax3.set_title('ABPD difference')          
         ax3.set_xlabel('Sample')
-        ax3.set_ylabel('LBPD')
+        ax3.set_ylabel('Normalized intensity (dB)')
             
         name = os.path.join(constant.MODELPATH, model_name, model_name)
         fig1.savefig(name + '_errordistribution.png', dpi=300)
@@ -339,48 +374,61 @@ def err_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         err_2channel = pd.DataFrame(err_2channel)
         # complex-valued error summation
         boxplot(err, 
-                'level', 
+                'Level', 
                 'sumerr', 
                 title_name='Error summation', 
                 model_name=model_name, 
                 saved_name='complexerrorboxplot')
         # complex-valued max error
         boxplot(err, 
-                'level', 
+                'Level', 
                 'maxerr', 
                 title_name='Max error', 
+                y_label='Normalized intensity',
                 model_name=model_name, 
                 saved_name='complexmaxerrorboxplot')
         # 2-branch error summation
         boxplot(err_2channel, 
-                'level', 
+                'Level', 
                 'sumerr', 
-                'channel', 
+                'Channel', 
                 title_name='2-branch error summation', 
+                y_label='Intensity',
                 model_name=model_name, 
                 saved_name='2Berrorboxplot')
         # 2-branch max error
         boxplot(err_2channel, 
-                'level', 
+                'Level', 
                 'maxerr', 
-                'channel', 
+                'Channel', 
                 title_name='2-branch max error', 
+                y_label='Intensity',
                 model_name=model_name, 
                 saved_name='2Bmaxerrorboxplot')
         # lateral projection error
         boxplot(err, 
-                'level', 
+                'Level', 
                 'LBPD',
                 title_name='LBPD', 
+                y_label='Normalized intensity (dB)',
                 model_name=model_name, 
                 saved_name='LBPDboxplot')
         # Axial projection error
         boxplot(err, 
-                'level', 
+                'Level', 
                 'ABPD', 
                 title_name='ABPD', 
+                y_label='Normalized intensity (dB)',
                 model_name=model_name, 
                 saved_name='ABPDboxplot')
+        # mainlobe pulse difference
+        boxplot(err, 
+                'Level', 
+                'pulsediff', 
+                title_name='Mainlobe pulse difference', 
+                y_label='Intensity',
+                model_name=model_name, 
+                saved_name='pulsediffboxplot')
 
 def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs):
     '''
@@ -414,9 +462,9 @@ def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs)
         keyinds = np.hstack([np.argsort(err[key])[:n], np.argsort(err[key])[-n:]])
         for ii, ind in enumerate(keyinds):
             if ii < n:
-                name = 'worst' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+                name = 'worst' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['Level'][ind])
             else:
-                name = 'best' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['level'][ind])
+                name = 'best' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['Level'][ind])
             drawfig(pred[ind], ref[ind], delay['delay'][ind], name, **kwargs)
 
 def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
@@ -440,17 +488,27 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
     assert pred.shape == ref.shape
     if focus:
         pred, ref = focusing(pred), focusing(ref)
+    # lateral projection
     lateral_proj_pred, lateral_proj_ref = projection(pred, 0), projection(ref, 0)
+    # axial projection
     axial_proj_pred, axial_proj_ref = projection(pred, 0, 'axial'), projection(ref, 0, 'axial')
+    # find lateral length
+    Npx = len(lateral_proj_pred[-1])
+    Npz = len(axial_proj_pred[-1])
+    # delay curve
     delay_curve = np.zeros((pred.shape[0],constant.NELEMENT))
     for ii in range(pred.shape[0]):
         delay_curve[ii] = get_delaycurve(inds[ii])
-    LBPDs = BPD(pred, ref, direction='lateral', **kwargs) # lateral or axial projection
+    # lateral beam pattern projection difference
+    LBPDs = BPD(pred, ref, direction='lateral', **kwargs) 
+    # axial beam pattern projection difference
     ABPDs = BPD(pred, ref, direction='axial', **kwargs)
+    # main lobe pulse difference
+    pulse_diff, rf_pred_mainlobe_aline, rf_ref_mainlobe_aline = mainlobe_pulse_diff(normalization(pred), ref, inds, True)
     level_len = len(np.unique(levels))
-    labels = ['level'+str(ii+1) for ii in range(level_len)]
+    labels = ['level-'+str(ii+1) for ii in range(level_len)]
     fig1, ax1 = plt.subplots(1,1) # level-n lateral projection of prediction
-    fig2, ax2 = plt.subplots(1,1) # level-n lateral projection of reference
+    # fig2, ax2 = plt.subplots(1,1) # level-n lateral projection of reference
     for level in range(1,level_len+1):
         sorted_ind = np.argsort(LBPDs[levels==level])
         leveln_inds = levels==level # level-n sorted index
@@ -464,40 +522,67 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         leveln_ABPD = ABPDs[leveln_inds][sorted_ind]  # level-n ABPD
         leveln_pred = pred[leveln_inds][sorted_ind]  # level-n prediction
         leveln_ref = ref[leveln_inds][sorted_ind] # level-n reference
-        ax1.plot(np.mean(leveln_lateral_proj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
-        ax2.plot(np.mean(leveln_lateral_proj_ref,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1])
+        leveln_pulse_diff = pulse_diff[leveln_inds][sorted_ind]
+        leveln_rf_pred_mainlobe_aline = rf_pred_mainlobe_aline[leveln_inds][sorted_ind]
+        leveln_rf_ref_mainlobe_aline = rf_ref_mainlobe_aline[leveln_inds][sorted_ind]
+        ax1.plot(np.mean(leveln_lateral_proj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1]+' pred.')
+        ax1.plot(np.mean(leveln_lateral_proj_ref,axis=0), color=constant.COLORSHIT[level-1],linestyle='dashed', label=labels[level-1]+' ref.')
         
         for ii in range(len(sorted_ind)):
+            axis = get_axis(leveln_pred[ii], leveln_data_inds[ii])
+            x_axis = np.linspace(axis[0], axis[1], Npx)
+            z_axis = np.linspace(axis[2], axis[3], Npz)
             dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
             saved_name = 'L' + str(level) + '_i' + str(leveln_data_inds[ii]) + '_rank' + str(ii) # saved name e.g. L4_i129
             plt.figure()
-            plt.plot(leveln_lateral_proj_pred[ii], label='Prediction')
-            plt.plot(leveln_lateral_proj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.plot(x_axis, leveln_lateral_proj_pred[ii], label='Prediction')
+            plt.plot(x_axis, leveln_lateral_proj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.ylim([-80,0])
             plt.title(f"level-{level} lateral projection_i{leveln_data_inds[ii]}_{leveln_LBPD[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
+            plt.xlabel('Lateral position (mm)')
+            plt.ylabel('Normalized intensity (dB)')
             plt.legend()
             save_fig(model_name, saved_name + 'lateralproj', dir_)
             plt.close('all')
             plt.figure()
             plt.plot(leveln_axial_proj_pred[ii], label='Prediction')
             plt.plot(leveln_axial_proj_ref[ii], linestyle='dashed',label='Ground truth')
+            plt.xlabel('Lateral position (mm)')
+            plt.ylabel('Normalized intensity (dB)')
             plt.title(f"level-{level} axial projection_i{leveln_data_inds[ii]}_{leveln_ABPD[ii]:.2f}") # e.g. level-4 lateral projection_i129_1.22
             plt.legend()
             save_fig(model_name, saved_name + 'axialproj', dir_)
             plt.close('all')
+            plt.figure()
+            plt.plot(z_axis[Npz//3:2*Npz//3], leveln_rf_pred_mainlobe_aline[ii], label='Prediction')
+            plt.plot(z_axis[Npz//3:2*Npz//3], leveln_rf_ref_mainlobe_aline[ii], linestyle='dashed',label='Ground truth')
+            plt.title(f"level-{level} main-lobe pulse difference_i{leveln_data_inds[ii]}_{leveln_pulse_diff[ii]:.2f}") # e.g. level-4 main-lobe pulse difference_i129_1.22
+            plt.xlabel('Depth (mm)')
+            plt.ylabel('Normalized intensity')
+            plt.legend()
+            save_fig(model_name, saved_name + 'pulsediff', dir_)
+            plt.close('all')
+            # envelope_fig2((leveln_ref[ii],leveln_pred[ii]),
+            #               title_names=['Ground truth Bmode_i' + str(leveln_data_inds[ii]),'Prediction Bmode_i' + str(leveln_data_inds[ii])], 
+            #               ind=leveln_data_inds[ii], 
+            #               model_name=model_name, 
+            #               saved_name=saved_name+'_RefvsPred_Bmode',
+            #               saved_dir=dir_,
+            #               show=False)
             envelope_fig(leveln_pred[ii], 
-                         title_name='Prediction Bmode_i' + str(leveln_data_inds[ii]), 
-                         ind=leveln_data_inds[ii], 
-                         model_name=model_name, 
-                         saved_name=saved_name+'_Prediction_Bmode',
-                         saved_dir=dir_,
-                         show=False)
+                          title_name='Prediction Bmode_i' + str(leveln_data_inds[ii]), 
+                          ind=leveln_data_inds[ii], 
+                          model_name=model_name, 
+                          saved_name=saved_name+'_Prediction_Bmode',
+                          saved_dir=dir_,
+                          show=False)
             envelope_fig(leveln_ref[ii], 
-                         title_name='Ground truth Bmode_i' + str(leveln_data_inds[ii]), 
-                         ind=leveln_data_inds[ii], 
-                         model_name=model_name, 
-                         saved_name=saved_name+'_Groundtruth_Bmode', 
-                         saved_dir=dir_,
-                         show=False)
+                          title_name='Ground truth Bmode_i' + str(leveln_data_inds[ii]), 
+                          ind=leveln_data_inds[ii], 
+                          model_name=model_name, 
+                          saved_name=saved_name+'_Groundtruth_Bmode', 
+                          saved_dir=dir_,
+                          show=False)
             delay_fig(leveln_delay_curve[ii], 
                       title_name='Delay curve_i' + str(leveln_data_inds[ii]), 
                       model_name=model_name, 
@@ -519,18 +604,18 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         save_fig(model_name, 'L' + str(level) + 'projection performance', dir_)
         plt.close('all')
     # draw and save figure 1 and figure 2
-    ax1.set_title('Prediction')
+    ax1.set_title('Average leateral beam pattern projection')
     ax1.set_xlabel('Lateral position (mm)')
     ax1.set_ylabel('Depth (mm)')
     ax1.legend()
-    save_fig(model_name, 'avgLBPDprediction', fig=fig1)
+    save_fig(model_name, 'avgLBPprediction', fig=fig1)
     plt.close(1)
-    ax2.set_title('Ground truth')
-    ax2.set_xlabel('Lateral position (mm)')
-    ax2.set_ylabel('Depth (mm)')
-    ax2.legend()
-    save_fig(model_name, 'avgLBPDreference', fig=fig2)
-    plt.close(2)
+    # ax2.set_title('Ground truth')
+    # ax2.set_xlabel('Lateral position (mm)')
+    # ax2.set_ylabel('Depth (mm)')
+    # ax2.legend()
+    # save_fig(model_name, 'avgLBPDreference', fig=fig2)
+    # plt.close(2)
 
 def levelnIOU_fig(signal1, signal2, levels, model_name=None):
     '''
