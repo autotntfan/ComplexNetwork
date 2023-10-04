@@ -26,7 +26,8 @@ else:
     from .data_utils import reduce_dim, envelope_detection, angle, projection, split_complex, normalization, focusing
     from .info import get_axis, get_level, get_sampling_rate, get_delaycurve, progressbar
     from .analysis import complex_diff, phase_diff, BPD, IOU, err_statistic, leveln_IOU, mainlobe_pulse_diff
-
+from scipy import signal
+from scipy.io import loadmat
 # ------------------------- basic figure -------------------------
 def save_fig(model_name=None, saved_name=None, saved_dir=None, fig=None):
     '''
@@ -279,8 +280,8 @@ def project_fig(signal, ref=None, gain=0, direction='lateral', focus=True, show=
     Lateral or axial projection.
     '''
     if focus:
-        signal = focusing(signal)
-        ref = focusing(ref)
+        signal = focusing(signal, hasN=False)
+        ref = focusing(ref, hasN=False)
     plt.figure()
     plt.plot(projection(signal, gain, direction))
     if ref is not None:
@@ -467,7 +468,7 @@ def bwp_fig(pred, ref, levels, inds, focus=True, n=3, model_name=None, **kwargs)
                 name = 'best' + key + '_i' + str(err['ind'][ind]) + '_L' + str(err['Level'][ind])
             drawfig(pred[ind], ref[ind], delay['delay'][ind], name, **kwargs)
 
-def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
+def leveln_fig(prediction, reference, levels, inds, focus=True, model_name=None, **kwargs):
     '''
     Plot from the best to worst lateral or axial beam pattern projection with respect to the different phase
     aberration level.
@@ -485,16 +486,14 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
                 i.e. vmin=0, gain=60 then value<0 would be forced to 0
         
     '''
-    assert pred.shape == ref.shape
+    assert prediction.shape == reference.shape
+    H, W = prediction.shape[1], prediction.shape[2]
     if focus:
-        pred, ref = focusing(pred), focusing(ref)
+        pred, ref = focusing(prediction), focusing(reference)
     # lateral projection
     lateral_proj_pred, lateral_proj_ref = projection(pred, 0), projection(ref, 0)
     # axial projection
     axial_proj_pred, axial_proj_ref = projection(pred, 0, 'axial'), projection(ref, 0, 'axial')
-    # find lateral length
-    Npx = len(lateral_proj_pred[-1])
-    Npz = len(axial_proj_pred[-1])
     # delay curve
     delay_curve = np.zeros((pred.shape[0],constant.NELEMENT))
     for ii in range(pred.shape[0]):
@@ -508,6 +507,17 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
     level_len = len(np.unique(levels))
     labels = ['level-'+str(ii+1) for ii in range(level_len)]
     fig1, ax1 = plt.subplots(1,1) # level-n lateral projection of prediction
+    
+    factor = 2
+    pulse_file = loadmat('RFpulses.mat')
+    estimated_pulse = pulse_file.get('pulses')
+    estimated_pulse = estimated_pulse[inds,1::2]
+    if focus:
+        estimated_pulse = focusing(estimated_pulse)
+    estimated_pulse = signal.resample_poly(estimated_pulse, factor, 1,axis=1)
+    rf_pred_mainlobe_aline = signal.resample_poly(rf_pred_mainlobe_aline, factor, 1, axis=1)
+    rf_ref_mainlobe_aline = signal.resample_poly(rf_ref_mainlobe_aline, factor, 1, axis=1)
+
     # fig2, ax2 = plt.subplots(1,1) # level-n lateral projection of reference
     for level in range(1,level_len+1):
         sorted_ind = np.argsort(LBPDs[levels==level])
@@ -525,13 +535,19 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
         leveln_pulse_diff = pulse_diff[leveln_inds][sorted_ind]
         leveln_rf_pred_mainlobe_aline = rf_pred_mainlobe_aline[leveln_inds][sorted_ind]
         leveln_rf_ref_mainlobe_aline = rf_ref_mainlobe_aline[leveln_inds][sorted_ind]
+        leveln_estimated_pulse = estimated_pulse[leveln_inds][sorted_ind]
         ax1.plot(np.mean(leveln_lateral_proj_pred,axis=0), color=constant.COLORSHIT[level-1],label=labels[level-1]+' pred.')
         ax1.plot(np.mean(leveln_lateral_proj_ref,axis=0), color=constant.COLORSHIT[level-1],linestyle='dashed', label=labels[level-1]+' ref.')
         
         for ii in range(len(sorted_ind)):
-            axis = get_axis(leveln_pred[ii], leveln_data_inds[ii])
-            x_axis = np.linspace(axis[0], axis[1], Npx)
-            z_axis = np.linspace(axis[2], axis[3], Npz)
+            axis = get_axis(prediction[ii], leveln_data_inds[ii]) # to get the original axis (without focusing)
+            x_axis = np.linspace(axis[0], axis[1], W)
+            z_axis = np.linspace(axis[2], axis[3], H)
+            if focus:
+                x_axis = focusing(x_axis)
+                z_axis = focusing(z_axis)
+            xf_axis = signal.resample_poly(x_axis, factor, 1, padtype='minimum')
+            zf_axis = signal.resample_poly(z_axis, factor, 1, padtype='minimum')
             dir_ = 'L' + str(level) + 'projection' # saved directory e.g. L4projection
             saved_name = 'L' + str(level) + '_i' + str(leveln_data_inds[ii]) + '_rank' + str(ii) # saved name e.g. L4_i129
             plt.figure()
@@ -554,8 +570,18 @@ def leveln_fig(pred, ref, levels, inds, focus=True, model_name=None, **kwargs):
             save_fig(model_name, saved_name + 'axialproj', dir_)
             plt.close('all')
             plt.figure()
-            plt.plot(z_axis[Npz//3:2*Npz//3], leveln_rf_pred_mainlobe_aline[ii], label='Prediction')
-            plt.plot(z_axis[Npz//3:2*Npz//3], leveln_rf_ref_mainlobe_aline[ii], linestyle='dashed',label='Ground truth')
+            plt.plot(zf_axis, leveln_rf_pred_mainlobe_aline[ii], label='Prediction')
+            plt.plot(zf_axis, leveln_estimated_pulse[ii], label='Estimated pulse')
+            plt.plot(zf_axis, leveln_rf_ref_mainlobe_aline[ii], linestyle='dashed',label='Ground truth')
+            plt.title(f"level-{level} main-lobe pulse difference_i{leveln_data_inds[ii]}_{leveln_pulse_diff[ii]:.2f}") # e.g. level-4 main-lobe pulse difference_i129_1.22
+            plt.xlabel('Depth (mm)')
+            plt.ylabel('Normalized intensity')
+            plt.legend()
+            save_fig(model_name, saved_name + 'pulsediff3', dir_)
+            plt.close('all')
+            plt.figure()
+            plt.plot(zf_axis, leveln_rf_pred_mainlobe_aline[ii], label='Prediction')
+            plt.plot(zf_axis, leveln_rf_ref_mainlobe_aline[ii], linestyle='dashed',label='Ground truth')
             plt.title(f"level-{level} main-lobe pulse difference_i{leveln_data_inds[ii]}_{leveln_pulse_diff[ii]:.2f}") # e.g. level-4 main-lobe pulse difference_i129_1.22
             plt.xlabel('Depth (mm)')
             plt.ylabel('Normalized intensity')
