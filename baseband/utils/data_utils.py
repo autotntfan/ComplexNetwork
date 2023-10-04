@@ -157,6 +157,26 @@ def bbdemodulate(signals, inds):
 
         return bbsignal
   
+def time2kspace(signals):
+    axes = {
+        4: (1,2),
+        3: (0,1),
+        2: (0,1)
+        }
+    if signals.ndim in {3,4} and signals.shape[-1]%2 == 0:
+        # if input signal is 2-branch complex signal
+        signals = convert_to_complex(signals)
+    Signals = np.fft.fft2(signals, axes=axes[signals.ndim])
+    return convert_to_real(Signals)
+
+def kspace2time(Signals):
+    Signals = convert_to_complex(Signals)
+    axes = {
+        4: (1,2),
+        3: (0,1),
+        2: (0,1)
+        }
+    return np.fft.ifft2(Signals, axes=axes[Signals.ndim])
 
 def bb2rf2D(signals, inds):
     '''
@@ -481,27 +501,41 @@ def angle(signal):
     else:
         return np.apply_over_axes(np.unwrap, wrapped_angle, [0,1])
     
-def focusing(img, ratio=0.05):
+def focusing(img, ratio=0.05, hasN=True):
     '''
-    In order to remove artifacts around edge.
+    In order to remove artifacts around edge. Support for data format NHWC, HWC, NHW, HW, NH, 1D.
         Args:
             img: Numpy array, displayed images.
             ratio: A decimal, clipping ratio of image.
         Return:
             Pruned numpy arrays.
     '''
-    if ratio <= 0 or ratio >= 1:
+    if ratio < 0 or ratio >= 1:
         raise ValueError('ratio is out of boundary')
     shape = img.shape
     if img.ndim == 4:
+        # NHWC
+        if not hasN:
+            raise ValueError("The first dimension of a 4-D array must have N")
         H, W = round(shape[1]*ratio), round(shape[2]*ratio)
         return img[:,H:-H,W:-W,:]
     elif img.ndim == 3:
-        H, W = round(shape[0]*ratio), round(shape[1]*ratio)
-        return img[H:-H,W:-W,:]
+        if hasN: #NHW
+            H, W = round(shape[1]*ratio), round(shape[2]*ratio)
+            return img[:,H:-H,W:-W]
+        else: # HWC
+            H, W = round(shape[0]*ratio), round(shape[1]*ratio)
+            return img[H:-H,W:-W,:]
     elif img.ndim == 2:
-        H, W = round(shape[0]*ratio), round(shape[1]*ratio)
-        return img[H:-H,W:-W]
+        if hasN: # NH
+            H = round(shape[1]*ratio)
+            return img[:,H:-H]
+        else: # HW
+            H, W = round(shape[0]*ratio), round(shape[1]*ratio)
+            return img[H:-H,W:-W]
+    elif img.ndim == 1:
+        H = round(shape[0]*ratio)
+        return img[H:-H]
     else:
         raise ValueError(f'Unrecognized complex array with shape {shape}')
         
