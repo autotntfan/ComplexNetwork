@@ -143,7 +143,6 @@ class ComplexNormalization(Layer):
 
 class ComplexConcatenate(Layer):
     '''
-    Complex-valued concatenate layer
     '''
     def __init__(self, axis=-1, **kwargs):
         super().__init__(**kwargs)
@@ -155,9 +154,10 @@ class ComplexConcatenate(Layer):
         for x in tensors:
             real_buffer.append(get_realpart(x))
             imag_buffer.append(get_imagpart(x))
-        real = tf.concatenate(real_buffer, self.axis)
-        imag = tf.concatenate(imag_buffer, self.axis)
-        return tf.concatenate([real,imag], axis=-1)
+        real = tf.concat(real_buffer, self.axis)
+        imag = tf.concat(imag_buffer, self.axis)
+        return tf.concat([real,imag], axis=-1)
+
     
     def compute_output_shape(self, input_shape):
         if (not isinstance(input_shape, (tuple, list))) or (not isinstance(input_shape[0], (tuple, list))):
@@ -184,3 +184,17 @@ class ComplexConcatenate(Layer):
         }
         base_config = super().get_config()
         return dict(list(base_config.items()) + list(config.items()))
+    
+class GlobalAveragePooling(Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def call(self, tensors):
+        avg = tf.math.reduce_mean(tensors, axis=(1,2))
+        return avg
+    
+    def compute_output_shape(self, input_shape):
+        return(input_shape[0], input_shape[-1])
+    
+
+        
