@@ -9,7 +9,7 @@ import os
 import numpy as np
 import time
 from complexnn.activation import cReLU, zReLU, modReLU, AmplitudeMaxout, FLeakyReLU, ctanh, complexReLU, mish
-from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE, SSIM, MS_SSIM, SSIM_MSE, aSSIM_MSE, ssim_map, MSE, MAE
+from complexnn.loss import ComplexRMS, ComplexMAE, ComplexMSE, SSIM, MS_SSIM, SSIM_MSE, aSSIM_MSE, ssim_map, MSE, MAE, wMSE
 from complexnn.conv_test import ComplexConv2D, ComplexConv1D
 from complexnn.bn_test import ComplexBatchNormalization
 from complexnn.pool_test import MaxPoolingWithArgmax2D, MaxUnpooling2D
@@ -225,7 +225,7 @@ class BaseModel():
         if self.complex_network:
             assert self.input_shape[-1] == 2
             if isinstance(self.losses, str):
-                if self.losses not in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE','SSIM','MS_SSIM','SSIM_MSE', 'aSSIM_MSE', 'SSIM_map'}:
+                if self.losses not in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE','SSIM','MS_SSIM','SSIM_MSE', 'aSSIM_MSE', 'SSIM_map', 'wMSE'}:
                     raise KeyError('Invalid complex-valued loss function')
             if isinstance(self.activations, str):
                 if self.activations not in {'cReLU', 'zReLU', 'modReLU', 'ctanh','LeakyReLU', 'AMU', 'FLeakyReLU', 'complexReLU', 'mish'}:
@@ -251,7 +251,8 @@ class BaseModel():
             'FLeakyReLU': FLeakyReLU,
             'AmplitudeMaxout':AmplitudeMaxout,
             'complexReLU':complexReLU,
-            'mish':mish
+            'mish':mish,
+            'wMSE':wMSE
             }
         return custom_object
     
@@ -317,7 +318,7 @@ class BaseModel():
 
     def _convert_loss(self):
         # determine loss function 
-        if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE', 'SSIM', 'MSE','MAE', 'MS_SSIM' ,'SSIM_MSE', 'aSSIM_MSE', 'SSIM_map'}:
+        if self.losses in {'ComplexRMS', 'ComplexMAE', 'ComplexMSE', 'SSIM', 'MSE','MAE', 'MS_SSIM' ,'SSIM_MSE', 'aSSIM_MSE', 'SSIM_map', 'wMSE'}:
             self.losses = {
                 'ComplexRMS': ComplexRMS,
                 'ComplexMAE': ComplexMAE,
@@ -328,7 +329,8 @@ class BaseModel():
                 'MSE'       : MSE,
                 'MAE'       : MAE,
                 'aSSIM_MSE' : aSSIM_MSE,
-                'SSIM_map': ssim_map
+                'SSIM_map': ssim_map,
+                'wMSE': wMSE
                 }[self.losses]
             
        
@@ -340,11 +342,11 @@ class BaseModel():
         history = {
             'loss':[]
             }
-        x_train, y_train = normalization(x), normalization(y)
+        x_train, y_train = normalization(x).astype(np.float32), normalization(y).astype(np.float32)
         
         if self.validation_data is not None:
             x_val, y_val = self.validation_data
-            x_val, y_val = normalization(x_val), normalization(y_val)
+            x_val, y_val = normalization(x_val).astype(np.float32), normalization(y_val).astype(np.float32)
         elif self.validation_rate:
             num_train = round(x.shape[0]*(1-self.validation_rate))
             x_train, y_train = x[:num_train], y[:num_train]
@@ -354,6 +356,10 @@ class BaseModel():
         self.input_shape = x_train.shape[1:]
         self._sanitized()
         self._build_info()
+        if self.losses == 'wMSE':
+            wMSE_ = True
+        else:
+            wMSE_ = False
 
         
         if model_name is None:
@@ -400,12 +406,11 @@ class BaseModel():
         # plt.plot(y_train[4])
         # plt.show()
         
-        
+        if wMSE_:
+            map_ = tf.reduce_mean(tf.abs(x_train), axis=0, keepdims=True)
+            map_ = map_/(tf.reduce_mean(tf.abs(map_)) + tf.keras.backend.epsilon())
+            self.losses = self.losses(map_)
         for epoch in range(self.epochs):
-            try:
-                self.losses = self.losses(epoch/self.epochs)
-            except TypeError:
-                pass
             if self.batchsizeschedule and epoch != 0:
                 batch_size = int(1 + self.batch_size//self.epochs)
                 train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).shuffle(N).batch(batch_size)
@@ -1321,7 +1326,8 @@ class TestUNet(BaseModel):
         normalize_weight = False
         filters_factor = [4,8,16,32,64]
         # dropout_rates = [None,None,0.4,0.6,0.8]
-        dropout_rates = [None,None,0.3,0.5,0.7]
+        # dropout_rates = [None,None,0.3,0.5,0.7]
+        dropout_rates = [None,None,None,None,None]
         for ithlayer in range(self.num_downsample_layer):
             if ithlayer <= 0:
                 x = self._downsample_block_conv(x, filters_factor[ithlayer]*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
@@ -1333,6 +1339,7 @@ class TestUNet(BaseModel):
         x = self.activations()(x)
         # upsample
         skips = reversed(skips)
+        filters_factor = [4,4,8,16,32]
         for skip in skips:
             x = self.concatFunc()([x,skip])
             if ithlayer <= 0:
@@ -1355,46 +1362,142 @@ class TestUNet(BaseModel):
             x = self.activations()(x)
             return tf.keras.Model(inputs=inputs, outputs=x)
         
-class TestUNet1(BaseModel):
+class TestSegNet(BaseModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+    def _downsample_block_argmax(self, x, filters, kernel_size, dropout_rate=None, bn=False, normalize_weight=False, constraints=None, kernel_initializer='complex_independent'):
+        x = self.convFunc(filters, kernel_size, padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        x = self.activations()(x)
+        x, ind = MaxPoolingWithArgmax2D((2,2),2)(x)
+        if bn:
+            x = self.bnFunc()(x)
+        x = self.activations()(x)
+        if dropout_rate is not None:
+            x = Dropout(dropout_rate)(x)
+        return x, ind
+    
+    def _upsample_block_unpool(self, x, filters, kernel_size, dropout_rate=None, bn=False, normalize_weight=False, constraints=None, kernel_initializer='complex_independent'):
+        x = MaxUnpooling2D((2,2))(x)
+        x = self.activations()(x)
+        x = self.convFunc(filters, kernel_size, padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        if bn:
+            x = self.bnFunc()(x)
+        x = self.activations()(x)
+        if dropout_rate is not None:
+            x = Dropout(dropout_rate)(x)
+        return x
     
     def build_model(self):
+        tf.random.set_seed(self.seed)
         inputs = Input(self.input_shape)
-        # constraints = tf.keras.constraints.MinMaxNorm(1., 10.)
         constraints=None
         if self.forward:
             inputs_forward = Input(self.input_shape)            
         x = inputs
         # downsample
-        skips = []
+        inds = []
         kernel_initializer = 'complex'
         normalize_weight = False
+        filters_factor = [4,8,16,32,64]
+        # dropout_rates = [None,None,0.4,0.6,0.8]
+        dropout_rates = [None,None,0.3,0.5,0.7]
         for ithlayer in range(self.num_downsample_layer):
-            if ithlayer <= 2:
-                x = self.downsample_block_conv(x, 2**(ithlayer+1)*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
-                skips.append(x)
+            if ithlayer <=0:
+                x, ind = self._downsample_block_argmax(x, filters_factor[ithlayer]*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
             else:
-                x = self.downsample_block_conv(x, 2**(ithlayer+1)*self.filters, self.size, bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
-        x = self.convFunc(2**(ithlayer+1)*self.filters, self.size, padding='same', normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+                x, ind = self._downsample_block_argmax(x, filters_factor[ithlayer]*self.filters, self.size, dropout_rate=dropout_rates[ithlayer],bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
+            inds.append(ind)
+        x = self.convFunc(filters_factor[ithlayer]*self.filters, self.size, use_bias=self.use_bias, padding='same', normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
         x = self.bnFunc()(x)
         x = self.activations()(x)
         # upsample
-        skips = reversed(skips)
-        for ithlayer in range(self.num_downsample_layer,3,-1):
-            x = self.upsample_block_PS(x, 2**(ithlayer+1)*self.filters, self.size, bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer)
-        for skip in skips:
-            x = self.concatFunc()([x,skip])
-            x = self.upsample_block_transp(x, 2**(ithlayer+1)*self.filters, self.size,  normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer)
+        inds = reversed(inds)
+        filters_factor = [4,4,8,16,32]
+        for ind in inds:
+            if ithlayer <=0:
+                x = self._upsample_block_unpool([x,ind], filters_factor[ithlayer]*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
+            else:
+                x = self._upsample_block_unpool([x,ind], filters_factor[ithlayer]*self.filters, self.size, dropout_rate=dropout_rates[ithlayer], bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer)
+
             ithlayer = ithlayer - 1
-        for _ in range(3):
-            x = self.convFunc(2*self.filters, 3, padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
-            x = self.activations()(x)
         x = self.convFunc(1, (1,1), padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
         if self.forward:
             x = self.activations()(x)
             x = Concatenate(axis=-1)((x, inputs_forward))
             x = self.convFunc(2, 3, padding='same', use_bias=self.use_bias)(x)
+            x = self.bnFunc()(x)
+            x = tf.keras.layers.LeakyReLU()(x)
+            return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
+        else:    
+            x = self.activations()(x)
+            return tf.keras.Model(inputs=inputs, outputs=x)
+        
+class TestPSNet(BaseModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+    def _downsample_block_argmax(self, x, filters, kernel_size, dropout_rate=None, bn=False, normalize_weight=False, constraints=None, kernel_initializer='complex_independent'):
+        x = self.convFunc(filters, kernel_size, padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        x = self.activations()(x)
+        x, ind = MaxPoolingWithArgmax2D((2,2),2)(x)
+        if bn:
+            x = self.bnFunc()(x)
+        x = self.activations()(x)
+        if dropout_rate is not None:
+            x = Dropout(dropout_rate)(x)
+        return x, ind
+    
+    def _upsample_block_PS(self, x, filters, kernel_size, dropout_rate=None, bn=False, normalize_weight=False, constraints=None, kernel_initializer='complex_independent'):
+        # pixel shuffle
+        x = PixelShuffler((2,2))(x)
+        if bn:
+            x = self.bnFunc()(x)
+        x = self.activations()(x)
+        x = self.convFunc(filters, kernel_size, padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        if bn:
+            x = self.bnFunc()(x)
+        x = self.activations()(x)
+        if dropout_rate is not None:
+            x = Dropout(dropout_rate)(x)
+        return x
+    
+    def build_model(self):
+        tf.random.set_seed(self.seed)
+        inputs = Input(self.input_shape)
+        constraints=None
+        if self.forward:
+            inputs_forward = Input(self.input_shape)            
+        x = inputs
+        # downsample
+        kernel_initializer = 'complex'
+        normalize_weight = False
+        filters_factor = [4,8,16,32,64]
+        # dropout_rates = [None,None,0.4,0.6,0.8]
+        dropout_rates = [None,None,0.3,0.5,0.7]
+        for ithlayer in range(self.num_downsample_layer):
+            if ithlayer <= 0:
+                x = self._downsample_block_conv(x, filters_factor[ithlayer]*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
+            else:
+                x = self._downsample_block_conv(x, filters_factor[ithlayer]*self.filters, self.size, dropout_rate=dropout_rates[ithlayer],bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
+        x = self.convFunc(filters_factor[ithlayer]*self.filters, self.size, use_bias=self.use_bias, padding='same', normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        x = self.bnFunc()(x)
+        x = self.activations()(x)
+        # upsample
+
+        filters_factor = [4,4,8,16,32]
+        for ithlayer in range(ithlayer,-1,-1):
+            if ithlayer <=0:
+                x = self._upsample_block_PS(x, filters_factor[ithlayer]*self.filters, self.size, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer) # downsampling 2^num_downsample_layer
+            else:
+                x = self._upsample_block_PS(x, filters_factor[ithlayer]*self.filters, self.size, dropout_rate=dropout_rates[ithlayer], bn=True, normalize_weight=normalize_weight, constraints=constraints, kernel_initializer=kernel_initializer)
+
+        x = self.convFunc(1, (1,1), padding='same', use_bias=self.use_bias, normalize_weight=normalize_weight, kernel_constraint=constraints, kernel_initializer=kernel_initializer)(x)
+        if self.forward:
+            x = self.activations()(x)
+            x = Concatenate(axis=-1)((x, inputs_forward))
+            x = self.convFunc(2, 3, padding='same', use_bias=self.use_bias)(x)
+            x = self.bnFunc()(x)
             x = tf.keras.layers.LeakyReLU()(x)
             return tf.keras.Model(inputs=[inputs, inputs_forward], outputs=x)
         else:    
@@ -1900,6 +2003,10 @@ def getModel(model_type):
         return SRN
     elif model_type in {'test', 'testUNet', 'testunet', 'TestUNet'}:
         return TestUNet
+    elif model_type in {'testsegnet', 'testSegNet', 'testSegnet', 'TestSegNet'}:
+        return TestSegNet
+    elif model_type in {'testpsnet', 'testPSNet', 'TestPSNet', 'TestPSnet'}:
+        return TestPSNet
     elif model_type in {'resunet', 'ResUNet', 'ResUnet'}:
         return ResUNet
     elif model_type in {'amuet', 'AMUnet', 'AMUNet'}:
