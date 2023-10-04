@@ -214,7 +214,7 @@ class GetData(SaveAllData):
         rate, this factor can be set as 2. It increase the interval along the depth direction. For RF data, it should be 1.
         num_training: Int, number of training data + validation data
         validation_split: float, from 0 to 1, ratio of validation set in num_training
-        complex_network: boolean, return radio-frequency or baseband data
+        complex_data: boolean, return radio-frequency or baseband data
         forward: boolean, also return ideal PSFs
         seed: int, random seed
         shuffle_method: 'normal' or 'mix', suffle index method, if normal, it ensures the training and testing data are
@@ -226,7 +226,7 @@ class GetData(SaveAllData):
             down_sample_factor=2,
             num_training=1800,
             validation_split=0.05,
-            complex_network=True,
+            complex_data=True,
             forward=False,
             seed=7414,
             shuffle_method='normal',
@@ -238,7 +238,7 @@ class GetData(SaveAllData):
             down_sample_factor=1,
             num_training=1800,
             validation_split=0,
-            complex_network=False,
+            complex_data=False,
             forward=False,
             seed=7414,
             shuffle_method='normal',
@@ -250,7 +250,7 @@ class GetData(SaveAllData):
             down_sample_factor=2,
             num_training=1800,
             validation_split=0.05,
-            complex_network=True,
+            complex_data=True,
             forward=False,
             seed=7414,
             shuffle_method='mix',
@@ -262,7 +262,7 @@ class GetData(SaveAllData):
                  down_sample_factor=2,
                  num_training=1800,
                  validation_split=0.05,
-                 complex_network=True,
+                 complex_data=True,
                  forward=False,
                  seed=7414,
                  shuffle_method='normal',
@@ -271,7 +271,7 @@ class GetData(SaveAllData):
         self.down_sample_factor = down_sample_factor # downsampling factor along axial direction
         self.num_training = num_training # number of training data + validation data
         self.validation_split = validation_split # ratio of validation set in num_training
-        self.complex_network = complex_network # return radio-frequency or baseband data
+        self.complex_data = complex_data # return radio-frequency or baseband data
         self.forward = forward # whether use forward path
         self.seed = seed # random seed
         if shuffle_method not in {'normal', 'mix'}:
@@ -285,7 +285,7 @@ class GetData(SaveAllData):
             raise ValueError(f"Dataset only has {constant.DATASIZE[0]} samples but requires {self.num_training} training data")
 
         # select rf or BB data
-        if self.complex_network:
+        if self.complex_data:
             data_list = ['speckle_bb', 'psf_bb']
         else:
             data_list = ['speckle_rf', 'psf_rf']
@@ -488,7 +488,7 @@ class GetData(SaveAllData):
             'num_testing':self.dataset_size['num_testing'],
             'num_valid':round(self.num_training*self.validation_split),
             'down_sample_factor':self.down_sample_factor,
-            'complex_network':self.complex_network,
+            'complex_data':self.complex_data,
             'forward':self.forward,
             'seed':self.seed,
             'cache_path':self.cache_path,
