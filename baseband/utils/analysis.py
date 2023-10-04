@@ -24,6 +24,7 @@ import cv2
 import tensorflow as tf
 import pandas as pd
 from scipy import signal
+
 # ------------------------- Metrics -------------------------
 def complex_diff(signal1, signal2, normalize=True):
     '''
@@ -156,12 +157,10 @@ def mainlobe_pulse_diff(pred_bb_psf, ref_bb_psf, inds, return_aline=False):
     N, H, W, C = pred_bb_psf.shape
     pred_bb_mainlobe_aline = pred_bb_psf[:,:,W//2,:]
     ref_bb_mainlobe_aline = ref_bb_psf[:,:,W//2,:]
-    rf_pred_mainlobe_aline = bb2rf1D(pred_bb_mainlobe_aline, inds)
-    rf_ref_mainlobe_aline = bb2rf1D(ref_bb_mainlobe_aline, inds)
-    rf_pred_mainlobe_aline = rf_pred_mainlobe_aline[:,H//3:2*H//3,:]
-    rf_ref_mainlobe_aline = rf_ref_mainlobe_aline[:,H//3:2*H//3,:]
-    pulse_diff = np.sum((rf_pred_mainlobe_aline - rf_ref_mainlobe_aline)**2, axis=(1,2))
-    if return_aline:
+    rf_pred_mainlobe_aline = np.squeeze(normalization(bb2rf1D(pred_bb_mainlobe_aline, inds)))
+    rf_ref_mainlobe_aline = np.squeeze(normalization(bb2rf1D(ref_bb_mainlobe_aline, inds)))
+    pulse_diff = np.sum((rf_pred_mainlobe_aline - rf_ref_mainlobe_aline)**2, axis=1)
+    if return_aline:     
         return pulse_diff, rf_pred_mainlobe_aline, rf_ref_mainlobe_aline
     else:
         return pulse_diff
