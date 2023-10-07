@@ -27,6 +27,90 @@ import complexnn
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
+def isrf(signal, hasN=True):
+    '''
+    This function is used to check the input "signal" is RF data. Data format must be in real.
+    Allow data shape includes:
+                complex format (BB data)        real format (RF data)
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+    *real format NHC is difficult to be recognized to NHW or NHC, so this shape is deprecated.
+    '''
+    # check signal is in real data format
+    if np.issubdtype(signal, np.complexfloating):
+        return False
+    rank = signal.ndim
+    if rank == 4 and hasN:
+        if signal.shape[-1]%2:
+            return True # [N,H,W,C] -> RF data
+        else:
+            return False # [N,H,W,C] -> BB data
+    if rank == 3:
+        if hasN:
+            return True # [N,H,W] -> RF data
+        if signal.shape[-1]%2:
+            return True # [H,W,C] -> RF data
+        else:
+            return False # [H,W,C] -> BB data
+    if rank in {1,2}:
+        return True # [H,W] or [N,H] -> RF data
+    raise ValueError(f'Signal shape is unsupported with shape {signal.shape}')
+
+def isbb(signal, hasN=True):
+    '''
+    This function is used to check the input "signal" is BB data. Data format can be in complex or real.
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+    '''
+    return not isrf(signal, hasN)          
+
+def get_shape(img, hasN, key=None):
+    '''
+    This function is used to get the shape of one of the NHWC.
+    Args:
+        img: Numpy array, complex-valued or complex-type.
+        hasN: Boolean, whether the first dimension represents amount N.
+        key: String, can be 'N','H','W','C','n','h','w','c'
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+    '''
+    if key not in {'N','H','W','C','n','h','w','c'}:
+        raise ValueError("key argument is invalid")
+    key = key.title() # convert to capital
+    rank = img.ndim
+    shape = img.shape
+    if hasN:
+        # NHWC, NHW, NH
+        axes = {
+            'N':0,
+            'H':1,
+            'W':2 if rank > 2 else None,
+            'C':3 if rank == 4 else None
+            }
+    else:
+        # HWC, HW, H
+        axes = {
+            'N':None,
+            'H':0,
+            'W':1 if rank > 1 else None,
+            'C':2 if rank == 3 else None,
+            }
+    axis = axes[key]
+    if axis is None:
+        raise ValueError(f'input image does NOT have this dimension with shape {shape}')
+    return shape[axis]
+    
+
 def get_custom_object():
     custom_object = {
         'ComplexConv2D':complexnn.conv_test.ComplexConv2D,
@@ -133,7 +217,7 @@ def get_axis(img, ind):
     zmin, zmax = (np.min(z_axis), np.max(z_axis))
     return (xmin, xmax, zmax, zmin)
 
-def get_sampling_rate(img, ind):
+def get_sampling_rate(img, ind, hasN):
     '''
     Find its sampling rate.
     ----------
@@ -144,8 +228,7 @@ def get_sampling_rate(img, ind):
         floating scalar, sampling rate
         
     '''
-    img = data_utils.precheck_dim(img)
-    H = img.shape[1]
+    H = get_shape(img, hasN, 'H')
     dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/H)
     return 1/(2*dz/constant.SOUNDV).reshape([-1])
     
