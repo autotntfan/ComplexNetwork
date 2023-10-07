@@ -14,12 +14,12 @@ if __name__ == '__main__':
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
-    from baseband.utils.data_utils import normalization, downsampling, convert_to_real, standardization
+    from baseband.utils.data_utils import normalization, downsampling, standardization
     from baseband.utils.info import progressbar, save_info, read_info
     sys.path.remove(addpath)
 else:
     from ..setting import constant
-    from ..utils.data_utils import normalization, downsampling, convert_to_real, standardization
+    from ..utils.data_utils import normalization, downsampling, standardization
     from ..utils.info import progressbar, save_info, read_info
 
 class BaseProcess():
@@ -57,11 +57,8 @@ class BaseProcess():
         input is real -> [N,H,W,1]
         input is complex -> [N,H,W,2]
         '''
-        if x.dtype == complex:
-            return convert_to_real(x).astype(np.float32)
-        else:
-            real = np.expand_dims(x, axis=-1)
-            return real.astype(np.float32)
+        return np.expand_dims(x, axis=-1)
+ 
         
     def save_npy_file(self, data, path, file_name=None):
         '''
@@ -143,16 +140,16 @@ class SaveAllData(BaseProcess):
     def __call__(self):
         file_name = os.listdir(self.dataset_path) # file names of all simulation data 
         # Check data size
-        self.check_datasize(self.dataset_path)
+        # self.check_datasize(self.dataset_path)
         data_size = self.get_dataset_size(self.dataset_path)
         if self.num_required_data is not None:
             data_size = list(data_size)
             data_size[0] = self.num_required_data
             data_size = tuple(data_size)
-        psf_bb = np.zeros(data_size, dtype=complex)
-        psf_rf = np.zeros(data_size)
-        speckle_bb = np.zeros(data_size,dtype=complex)
-        speckle_rf = np.zeros(data_size)
+        psf_bb = np.zeros(data_size, dtype=np.complex64)
+        psf_rf = np.zeros(data_size, dtype=np.float32)
+        speckle_bb = np.zeros(data_size, dtype=np.complex64)
+        speckle_rf = np.zeros(data_size, dtype=np.float32)
         count = 0
         # read psf and speckle in sequence
         for name in file_name:
