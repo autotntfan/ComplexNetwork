@@ -14,20 +14,88 @@ if __name__ == '__main__':
     if addpath not in sys.path:
         sys.path.append(addpath)
     from baseband.setting import constant
-    from baseband.utils.info import get_sampling_rate, get_data, progressbar
+    from baseband.utils.info import get_sampling_rate, get_data, progressbar, isrf, isbb
     sys.path.remove(addpath)
 else:
     from ..setting import constant
-    from .info import get_sampling_rate, get_data, progressbar
+    from .info import get_sampling_rate, get_data, progressbar, isrf, isbb
 import scipy.signal      as Signal
 import numpy as np
 import cv2
 
-def convert_to_complex(inputs):
+
+        
+def split_complex(x, hasN=True):
     '''
-    Convert real-valued input to complex-valued type array.
+    Split complex value (2-channel real format or pure complex format) into real and imaginary part.
+    If the "x" is RF data, x will be firstly convert to BB data and then splitted into real and imaginary part.
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+        
+        Args:
+            x: Numpy array, complex-valued or complex-type.
+            hasN: Boolean, whether the first dimension represents amount N.
+        Returns:
+            Two numpy array represent real and imaginary part respectively with
+            the same dimension of inputs.
+    
+    Example:
+        input = complex type BB data, output = Re{BB}, Im{BB}
+        i.e. a+bi -> a,b
+        
+        input = real type RF data, output = Re{BB}, Im{BB}
+        i.e. z -> a,b
+        
+        input = 2-channel real type BB data, output = first channel, second channel
+    '''
+    # for complex-valued type array
+    if np.iscomplex(x).any():
+        # return original shape
+        return np.real(x), np.imag(x)
+    shape = x.shape
+    rank = x.ndim
+    if rank not in {1,2,3,4}:
+        raise ValueError(f'Unrecognized complex array with shape {shape}')
+    if isrf(x, hasN):
+        # [N,H,W,1], [N,H,W], [H,W,1], [N,H], [H,W], [H]
+        x = convert_to_complex(x, hasN)
+    if rank in {1,2}:
+        # [H], [H,W], [N,H]
+        return np.real(x), np.imag(x)
+    if rank == 3:
+        if shape[-1]%2 == 0 and not hasN:
+            # [H,W,2] -> BB data
+            return x[:,:,:shape[-1]//2], x[:,:,shape[-1]//2:]
+        else:
+            # [N,H,W] -> RF data
+            # [H,W,1] -> RF data
+            return np.real(x), np.imag(x)         
+    if rank == 4:
+        if shape[-1]%2:
+            # [N,H,W,C] -> RF data
+            return np.real(x), np.imag(x)
+        else:
+            # [N,H,W,C] -> BB data
+            return x[:,:,:,:shape[-1]//2], x[:,:,:,shape[-1]//2:]
+
+        
+def convert_to_complex(inputs, hasN=True):
+    '''
+    This function is used to convert data format from real input to complex array.
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+            
         Args:
             inputs: Numpy array, real-valued or complex-type.
+            hasN: Boolean, whether the first dimension represents amount N.
         Return:
             complex-valued array with the same dimension of inputs.
         
@@ -37,38 +105,74 @@ def convert_to_complex(inputs):
         input = 2-channel real type BB data, output = complex type BB data (a+bi)
         
         input = complex type BB data, output = complex type BB data (a+bi)
+
     '''
     if inputs.dtype == np.complex64 or  inputs.dtype == np.complex128:
         return inputs
     shape = inputs.shape
     rank = inputs.ndim
+    if rank not in {1,2,3,4}:
+        raise ValueError(f'Unrecognized complex array with shape {shape}')
+    # axes = {rank:axis for hilbert transform}
+    axes = {
+        1:-1, # [H]
+        2:int(hasN), # NH or HW -> RF data
+        3:int(hasN), # NHW or HW1 -> RF data, HW2 -> BB data
+        4:1 # NHWC
+        }
+    if isrf(inputs, hasN):
+        return Signal.hilbert(inputs, axis=axes[rank])
+    else:
+        real, imag = split_complex(inputs, hasN)
+        return real + 1j*imag
+    
+    '''
+    # the above codes equal to the below ones
+    if rank == 1:
+        return Signal.hilbert(inputs)
     if rank == 2:
-        return Signal.hilbert(inputs, axis=0)
-    elif rank == 3:
-        # only allow [H,W,C]
+        # [N,H] or [H,W] -> RF data
+        return Signal.hilbert(inputs, axis=int(hasN))
+    if rank == 3 and not hasN:
+        # [H,W,C]
         if shape[-1]%2:
+            # [H,W,1] -> RF data
             # real-valued signal needs hilbert transform
             return Signal.hilbert(inputs, axis=0)
         else:
+            # [H,W,2] -> BB data in real-valued data format
             real, imag = split_complex(inputs)
             return real + 1j*imag
-    elif rank == 4:
+    if rank == 3 and hasN:
+        # [N,H,W] -> RF data
+        return Signal.hilbert(inputs, axis=1)
+    if rank == 4 and hasN:
+        # [N,H,W,C]
         if shape[-1]%2:
+            # [N,H,W,1] -> RF data
             # real-valued signal needs hilbert transform
             return Signal.hilbert(inputs, axis=1)
         else:
+            # [N,H,W,2] -> BB data in real-valued data format
             real, imag = split_complex(inputs)
             return real + 1j*imag
-    else:
-        raise ValueError(f'Unrecognized complex array with shape {shape}')
-        
-
-def convert_to_real(inputs):
     '''
-    Convert complex data type input to 2-channel real type array. If input is real data type, this
-    function returns intput itself.
+    
+def convert_to_real(inputs, hasN=True):
+    '''
+    This function is used to convert data format from complex to 2-channel real array. 
+    If input has been real data format, this function returns intput itself.
+    
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+        
         Args:
             inputs: Numpy array, real-valued or complex-type.
+            hasN: Boolean, whether the first dimension represents amount N.
         Return:
             real-valued array with the same dimension of inputs.
         
@@ -81,146 +185,164 @@ def convert_to_real(inputs):
     '''
     if inputs.dtype != np.complex64 and  inputs.dtype != np.complex128:
         return inputs
-    shape = inputs.shape
     rank = inputs.ndim
-    real, imag = split_complex(inputs)
+    real, imag = split_complex(inputs, hasN)
     if rank == 4:
         # complex dtype [N,H,W,1] -> [N,H,W,2] real dtype
         return np.concatenate((real,imag),axis=-1)
-    elif rank in {2,3}:
+    if rank in {1,2,3}:
+        # complex dtype [H] -> [H,2] real dtype XXX not used XXX
         # complex dtype [H,W] -> [H,W,2] real dtype
+        # complex dtype [N,H] -> [N,H,2] real dtype XXX not used XXX
         # complex dtype [N,H,W] -> [N,H,W,2] real dtype
+        if rank == 3 and not hasN:
+            # complex dtype [H,W,1] -> [H,W,2]
+            return np.concatenate((real,imag),axis=-1)
         real = np.expand_dims(real, axis=-1)
         imag = np.expand_dims(imag, axis=-1)
         return np.concatenate((real,imag),axis=-1)
+    raise ValueError(f'Unrecognized complex array with shape {inputs.shape}')
+
+def _rf2bb_1data(signals, fc, fs):
+    lpf = Signal.firwin(constant.FIRORDER, fc/(fs/2))
+    t = np.arange(0,signals.shape[0])/fs
+    if np.squeeze(signals).ndim == 1:
+        bbsignal = signals*np.exp(-1j*2*np.pi*fc*t)
+        return Signal.convolve(bbsignal, lpf, mode='same') # return 1D bb signal
+    t = t.reshape((signals.shape[0],1)) # 2D time, shape [time, 1]
+    bbsignal = reduce_dim(signals)*np.exp(-1j*2*np.pi*fc*t)
+    bbsignal = np.apply_along_axis(Signal.convolve, 0, bbsignal, lpf, 'same')
+    return bbsignal # return 2D bb signal
+
+def rf2bb(signals, inds=None, fc=None, fs=None, return_format='imag'):
+    '''
+    Baseband demodulation. If the input "signals" is BB signal, it converts data format according to the "return_format".
+    Args:
+        signals: Numpy array, RF signal or BB signal.
+        inds: int or Numpy array, indices of signals. If None, the default sampling rate and center frequency is based on the value in const file.
+        retur_format: 'imag' or 'real', return 2-channel real format BB signal or complex format signal.
+    Returns:
+        Baseband signal in real or complex format.
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+    '''
+    if return_format not in {'imag', 'real'}:
+        raise ValueError(f"retrun_format is required to be either 'imag' or 'real' but get {return_format}")    
+    shape = signals.shape # original shape
+    if isinstance(inds, int):
+        # BB data [1,H,W,1], [H,W,1], [H,W], [H] -> complex format [1,H,W,2], [H,W,2] -> real format
+        # RF data [1,H,W,1], [1,H,W], [H,W,1], [1,H], [H,W], [H]
+        N = 1 
+        inds = [inds] 
+        reduced_signals = np.squeeze(signals) # RF data [H,W], [H], BB data [H,W,2], [H,W], [H]
+        reduced_signals = np.expand_dims(reduced_signals, axis=0) # RF data [1,H,W], [1,H], BB data [1,H,W,2], [1,H,W], [1,H]
     else:
-        raise ValueError(f'Unrecognized complex array with shape {shape}')
-        
-def bbdemodulate(signals, inds):
-    '''
-    Baseband demodulation
-    '''
-    if np.iscomplex(signals).any():
-        # complex dtype
-        return signals
-    # real dtype
-    try:
-        N = len(inds)
-    except TypeError:
-        N = len(np.asarray([inds]))
-    if N == 1:
-        if signals.shape[-1]%2 == 0:
-            # BB data [H,W,C]
-            real, imag = split_complex(signals)
-            return real + 1j*imag
-        # [H,W,C], [H,W]
-        fc = np.squeeze(get_data(inds, 'f0'))
-        fs = get_sampling_rate(signals, inds)
-        t = np.arange(0,signals.shape[0])/fs
-        t = t.reshape((signals.shape[0],1))
-        lpf = Signal.firwin(constant.FIRORDER, fc/(fs/2))
-        twoDsignal = reduce_dim(signals)*np.exp(-1j*2*np.pi*fc*t)
-        assert twoDsignal.ndim == 2
-        assert lpf.ndim ==1
-        twoDsignal = np.apply_along_axis(Signal.convolve, 0, twoDsignal, lpf, 'same')
-        # [H,W,C]
-        if signals.shape[-1] in {1,2}:
-            # RF data [H,W,C]
-            return twoDsignal.reshape(signals.shape)  
+        # BB data [N,H,W,1] -> complex format [N,H,W,2] -> real format
+        # RF data [N,H,W,1], [N,H,W], [N,H]
+        N = shape[0]
+        reduced_signals = signals
+    hasN = True
+    if isbb(reduced_signals, hasN):
+        # returns
+        # BB data [1,H,W,1], [H,W,1], [H,W], [H] -> complex format [1,H,W,2], [H,W,2] -> real format
+        # BB data [N,H,W,1] -> complex format [N,H,W,2] -> real format
+        if return_format == 'imag':
+            return convert_to_complex(signals)
+        if return_format == 'real':
+            return convert_to_real(signals)
+    bbsignals = np.zeros(shape, dtype=np.complex64)
+    # N = 1:
+    #   [1,H,W], [1,H]
+    # N != 1:
+    #   [N,H,W,1], [N,H,W], [N,H]
+    for ii in range(N):
+        fc = fc if fc is not None else np.squeeze(get_data(inds[ii], 'f0'))
+        fs = fs if fs is not None else get_sampling_rate(reduced_signals[ii], inds[ii], False)
+        bbsignal = _rf2bb_1data(reduced_signals[ii], fc, fs) # [H,W] or [H]
+        if N == 1:
+            bbsignals = bbsignal
         else:
-            # [H,W] only RF
-            return twoDsignal
-    else:
-        # [N,H,W,C], [N,H,W]
-        # BB data [N,H,W,C]
-        if signals.ndim == 4 and signals.shape[-1]%2 == 0:
-            real, imag = split_complex(signals)
-            return real + 1j*imag
-        
-        bbsignal = np.zeros_like(signals, dtype=np.complex64)
-        for ii in range(len(signals)):
-            fc = np.squeeze(get_data(inds[ii], 'f0'))
-            fs = get_sampling_rate(signals[ii], inds[ii])
-            t = np.arange(0,signals.shape[1])/fs
-            t = t.reshape((-1,1))
-            lpf = Signal.firwin(constant.FIRORDER, fc/(fs/2))
-            twoDsignal = reduce_dim(signals[ii])*np.exp(-1j*2*np.pi*fc*t)
-            assert twoDsignal.ndim == 2
-            assert lpf.ndim ==1
-            twoDsignal = np.apply_along_axis(Signal.convolve, 0, twoDsignal, lpf, 'same')
             if signals.ndim == 4:
-                # RF data [N,H,W,C]
-                bbsignal[ii] = twoDsignal.reshape(signals.shape[1:-1] + (1,))
+                # [H,W] -> [H,W,1]
+                bbsignals[ii] = np.expand_dims(bbsignal, axis=-1)
             else:
-                bbsignal[ii] = twoDsignal
-            progressbar(ii+1, len(signals), 'Baseband demodulating')
+                bbsignals[ii] = bbsignal
+        progressbar(ii+1, len(inds), 'Baseband demodulating')
+    bbsignals = bbsignals.reshape(shape)
+    if return_format == 'imag':
+        return convert_to_complex(bbsignal, hasN).reshape(shape)
+    else:
+        return convert_to_real(bbsignals, hasN)
 
-        return bbsignal
-  
-def time2kspace(signals):
-    axes = {
-        4: (1,2),
-        3: (0,1),
-        2: (0,1)
-        }
-    if signals.ndim in {3,4} and signals.shape[-1]%2 == 0:
-        # if input signal is 2-branch complex signal
-        signals = convert_to_complex(signals)
-    Signals = np.fft.fft2(signals, axes=axes[signals.ndim])
-    return convert_to_real(Signals)
+def _bb2rf_1data(signals, fc, fs):
+    t = np.arange(0,signals.shape[0])/fs
+    if np.squeeze(signals).ndim == 1:
+        rfsignal = signals*np.exp(1j*2*np.pi*fc*t)
+        return rfsignal.real # return 1D bb signal
+    t = t.reshape((signals.shape[0],1)) # 2D time, shape [time, 1]
+    rfsignal = reduce_dim(signals)*np.exp(1j*2*np.pi*fc*t)
+    return rfsignal.real # return 2D bb signal
 
-def kspace2time(Signals):
-    Signals = convert_to_complex(Signals)
-    axes = {
-        4: (1,2),
-        3: (0,1),
-        2: (0,1)
-        }
-    return np.fft.ifft2(Signals, axes=axes[Signals.ndim])
-
-def bb2rf2D(signals, inds):
+    
+def bb2rf(signals, inds=None, fc=None, fs=None):
     '''
         signals: can be represented as complex-valued or two-channel real-valued data type. If it is 
         complex-valued data, shape can be [N,H,W], [N,H,W,1], or [H,W,1]. If it is two-channel real-valued
         data, shape can be [N,H,W,2] or [H,W,2].
+    Allow data shape includes:
+                complex format (BB data)        real format
+        4-D             NHWC                  NHWC (RF or BB data)
+        3-D            NHW.HWC          NHW (RF data).HWC (RF or BB data)
+        2-D             NH.HW            NH (RF data).HW (RF data)
+        1-D               H                      H (RF data)
+        
     '''
-    if not np.iscomplex(signals).any():
-        signals = convert_to_complex(signals) # convert to a+bi
-    try:
-        N = len(inds)
-    except TypeError:
-        N = len(np.asarray([inds]))
-    if N == 1:
-        # [H,W,1]
-        fc = np.squeeze(get_data(inds, 'f0'))
-        fs = get_sampling_rate(signals, inds)
-        t = np.arange(0,signals.shape[0])/fs
-        t = t.reshape((signals.shape[0],1))
-        RFsignal = reduce_dim(signals)*np.exp(1j*2*np.pi*fc*t)
-        assert RFsignal.ndim == 2
-        if signals.ndim == 2:
-            return RFsignal.real
-        else:
-            return np.expand_dims(RFsignal.real, axis=2)
+    shape = signals.shape
+    if isinstance(inds, int):
+        # RF data -> [1,H,W,1], [1,H,W], [H,W,1], [1,H], [H,W], [H]
+        # BB data -> [1,H,W,2], [H,W,2] and other complex format [1,H,W,1], [1,H,W], [H,W,1], [1,H], [H,W], [H]
+        N = 1 
+        inds = [inds]
+        reduced_signals = np.squeeze(signals) # RF data [H,W], [H], BB data [H,W,2], [H,W], [H]
+        reduced_signals = np.expand_dims(reduced_signals, axis=0) # RF data [1,H,W], [1,H], BB data [1,H,W,2], [1,H,W], [1,H]
     else:
-        # [N,H,W], or [N,H,W,1]
-        rank = signals.ndim
-        if rank == 4:
-            signals = np.squeeze(signals)
-        RFsignals = np.zeros_like(signals, dtype=np.float32) # [N,H,W]
-        for ii in range(len(signals)):
-            fc = np.squeeze(get_data(inds[ii], 'f0'))
-            fs = get_sampling_rate(signals[ii], inds[ii])
-            t = np.arange(0,signals.shape[1])/fs
-            t = t.reshape((-1,1)) # [H,1]
-            RFsignal = reduce_dim(signals[ii])*np.exp(1j*2*np.pi*fc*t) # [H,W]
-            assert RFsignal.ndim == 2
-            RFsignals[ii] = np.expand_dims(RFsignal.real, axis=0)
-            progressbar(ii+1, len(signals), 'Modulating')
-        if rank == 4:
-            return np.expand_dims(RFsignals, axis=3)
+        # BB data [N,H,W,1] -> complex format, [N,H,W,2] -> real format
+        # BB data [N,H,W], [N,H] -> complex format
+        N = shape[0]
+        reduced_signals = signals
+    hasN = True
+    if isrf(reduced_signals, hasN):
+        return signals
+    else:
+        # BB data [1,H,W,2] -> real format, [1,H,W], [1,H] -> complex format
+        # BB data [N,H,W,2] -> real format, BB data [N,H,W,1] -> complex format 
+        reduced_signals = convert_to_complex(reduced_signals) # convert to a+bi [N,H,W,2] -> [N,H,W,1], 
+    rfsignals = np.zeros_like(reduced_signals, dtype=np.float32)
+    # N = 1:
+    #   [1,H,W,1], [1,H,W], [1,H]
+    # N != 1:
+    #   [N,H,W,1], [N,H,W], [N,H]
+    for ii in range(N):
+        fc = fc if fc is not None else np.squeeze(get_data(inds[ii], 'f0'))
+        fs = fs if fs is not None else get_sampling_rate(reduced_signals[ii], inds[ii], False)
+        rfsignal = _bb2rf_1data(reduced_signals[ii], fc, fs) # [H,W] or [H]
+        if N == 1:
+            rfsignals = rfsignal.astype(np.float32)
+            return rfsignals.reshape(shape)
         else:
-            return RFsignals
+            if signals.ndim == 4:
+                # [H,W] -> [H,W,1]
+                rfsignals[ii] = np.expand_dims(rfsignal, axis=-1)
+            else:
+                rfsignals[ii] = rfsignal
+        progressbar(ii+1, len(inds), 'Baseband demodulating')
+    return rfsignals.astype(np.float32)
+
+            
     
 def bb2rf1D(signals, inds):
     '''
@@ -267,52 +389,47 @@ def bb2rf1D(signals, inds):
         else:
             return RFsignals
     
-        
-def split_complex(x):
+def time2kspace(signals, hasN=True, shift=False):
     '''
-    Split complex-valued type or complex-type array to real and imaginary part
-        Args:
-            x: Numpy array, complex-valued or complex-type.
-        Returns:
-            Two numpy array represent real and imaginary part respectively with
-            the same dimension of inputs.
-    
-    Example:
-        input = complex type BB data, output = Re{BB}, Im{BB}
-        i.e. a+bi -> a,b
-        
-        input = real type RF data, output = Re{BB}, Im{BB}
-        i.e. z -> a,b
-        
-        input = 2-channel real type BB data, output = first channel, second channel
+    Transform signal from time space to frequency space, i.e. k-space.
+    Allow data shape includes
+        4-D: complex-valued NHWC (BB data) , real-valued NHWC (channel represents RF or BB data)
+        3-D: complex-valued NHW (BB data), real-valued NHW (RF data), real-valued HWC (channel represents RF or BB data)
+        2-D: complex-valued HW (BB data), real-valued HW (RF data)
     '''
-    # for complex-valued type array
-    if np.iscomplex(x).any():
-        # return original shape
-        return np.real(x), np.imag(x)
-    shape = x.shape
-    rank = x.ndim
-    if rank == 2:
-        x = convert_to_complex(x)
-        return np.real(x), np.imag(x)
-    elif rank == 3:
-        # for complex-type array
-        # only allow [H,W,C]
-        if shape[-1]%2:
-            x = convert_to_complex(x)
-            return np.real(x), np.imag(x)
-        else:
-            return x[:,:,:shape[-1]//2], x[:,:,shape[-1]//2:]
-    elif rank == 4:
-        if shape[-1]%2:
-            x = convert_to_complex(x)
-            return np.real(x), np.imag(x)
-        else:
-            return x[:,:,:,:shape[-1]//2], x[:,:,:,shape[-1]//2:]
-    else:
-        raise ValueError(f'Unrecognized complex array with shape {shape}')   
+    # axes = {rank:axis for fft2 i.e. the image shape of H,W }
+    axes = {
+        4: (1,2),
+        3: (1,2) if hasN else (0,1),
+        2: (0,1),
+        }
+    if isbb(signals):
+        signals = convert_to_complex(signals, hasN)
+    Signals = np.fft.fft2(signals, axes=axes[signals.ndim])
+    if shift:
+        Signals = np.fftshift(Signals)
+    return convert_to_real(Signals)
 
-def normalization(inputs):
+def kspace2time(Signals, hasN=True, shift=False):
+    '''
+    Transform signal from frequency space, i.e. k-space, to time space.
+    Allow data shape includes
+        4-D: complex data with shape NHW1 (complex format) or NHW2 (real format)
+        3-D: complex data with shape NHW (complex format) or HW2 (real format)
+        2-D: complex data with shape HW (complex format)
+    '''
+    if shift:
+        Signals = np.ifftshift(Signals)
+    Signals = convert_to_complex(Signals)
+    axes = {
+        4: (1,2),
+        3: (1,2) if hasN else (0,1),
+        2: (0,1)
+        }
+    return np.fft.ifft2(Signals, axes=axes[Signals.ndim])     
+
+
+def normalization(inputs, hasN=True):
     '''
     Limit input in the range of [-1,1] for coherent signal, or [0,1]
     for incoherent signal.
@@ -326,34 +443,49 @@ def normalization(inputs):
     '''
     shape = inputs.shape
     rank = inputs.ndim
-    if rank == 2:
-        # [H,W] in real or complex type
-        return inputs/np.max(np.abs(inputs))
-    elif rank == 3:
-        # only [H,W,C], [N,H,W] is NOT available
-        if shape[-1]%2:
-            # real type array
-            return inputs/(np.max(np.abs(inputs)) + 1e-32)
-        else:
-            # complex type array
-            real = inputs[:,:,:shape[-1]//2]
-            imag = inputs[:,:,shape[-1]//2:]
-            modulus = np.sqrt(real**2 + imag**2)
-            return inputs/(np.max(modulus) + 1e-32)
-    elif rank == 4:
-        if shape[-1]%2:
-            # real type array, e.g. [N,H,W,1]
-            return inputs/np.max(np.abs(inputs), axis=(1,2,3), keepdims=True)
-        else:
-            # complex type array, e.g. [N,H,W,2]
-            real = inputs[:,:,:,:shape[-1]//2]
-            imag = inputs[:,:,:,shape[-1]//2:]
-            modulus = np.sqrt(real**2 + imag**2)
-            return inputs/(np.max(modulus, axis=(1,2,3), keepdims=True) + 1e-32)
-    else:
+    if rank not in {1,2,3,4}:
         raise ValueError(f"Unrecognized data type with shape {shape}")
+    axes = {
+        1:-1,
+        2:1 if hasN else 0,
+        3:(1,2) if hasN else None,
+        4:(1,2,3)
+        }
+    if isbb(inputs):
+        modulus = np.abs(inputs)
+        return inputs/(np.max(modulus, axis=axes[rank], keepdims=True) + 1e-32)
+    else:
+        return inputs/(np.max(inputs, axis=axes[rank], keepdims=True) + 1e-32)
         
-def standardization(inputs):
+        
+    # if rank == 2:
+    #     # [H,W] in real or complex type
+    #     return inputs/np.max(np.abs(inputs))
+    # elif rank == 3:
+    #     # only [H,W,C], [N,H,W] is NOT available
+    #     if shape[-1]%2:
+    #         # real type array
+    #         return inputs/(np.max(np.abs(inputs)) + 1e-32)
+    #     else:
+    #         # complex type array
+    #         real = inputs[:,:,:shape[-1]//2]
+    #         imag = inputs[:,:,shape[-1]//2:]
+    #         modulus = np.sqrt(real**2 + imag**2)
+    #         return inputs/(np.max(modulus) + 1e-32)
+    # elif rank == 4:
+    #     if shape[-1]%2:
+    #         # real type array, e.g. [N,H,W,1]
+    #         return inputs/np.max(np.abs(inputs), axis=(1,2,3), keepdims=True)
+    #     else:
+    #         # complex type array, e.g. [N,H,W,2]
+    #         real = inputs[:,:,:,:shape[-1]//2]
+    #         imag = inputs[:,:,:,shape[-1]//2:]
+    #         modulus = np.sqrt(real**2 + imag**2)
+    #         return inputs/(np.max(modulus, axis=(1,2,3), keepdims=True) + 1e-32)
+    # else:
+    #     raise ValueError(f"Unrecognized data type with shape {shape}")
+        
+def standardization(inputs, hasN=True):
     '''
     Limit input in the range of [-1,1] for coherent signal, or [0,1]
     for incoherent signal.
@@ -367,39 +499,50 @@ def standardization(inputs):
     '''
     shape = inputs.shape
     rank = inputs.ndim
-    def _standardization(x, axis=None):
-        if axis is None:
-            return (x - np.mean(x))/(np.std(x) + 1e-32)
-        else:
-            return (x - np.mean(x, axis, keepdims=True))/(np.std(x, axis, keepdims=True) + 1e-32)
-    if rank == 2:
-        # [H,W] in real or complex type
-        return _standardization(inputs)
-    elif rank == 3:
-        # only [H,W,C], [N,H,W] is NOT available
-        if shape[-1]%2:
-            # real type array
-            return _standardization(inputs)
-        else:
-            # complex type array
-            real = inputs[:,:,:shape[-1]//2]
-            imag = inputs[:,:,shape[-1]//2:]
-            real = _standardization(real)
-            imag = _standardization(imag)
-            return np.concatenate((real,imag),axis=-1)
-    elif rank == 4:
-        if shape[-1]%2:
-            # real type array, e.g. [N,H,W,1]
-            return _standardization(inputs, axis=(1,2,3))
-        else:
-            # complex type array, e.g. [N,H,W,2]
-            real = inputs[:,:,:,:shape[-1]//2]
-            imag = inputs[:,:,:,shape[-1]//2:]
-            real = _standardization(real, axis=(1,2,3))
-            imag = _standardization(imag, axis=(1,2,3))
-            return np.concatenate((real, imag), axis=-1)
-    else:
+    if rank not in {1,2,3,4}:
         raise ValueError(f"Unrecognized data type with shape {shape}")
+    axes = {
+        1:-1,
+        2:1 if hasN else 0,
+        3:(1,2) if hasN else None,
+        4:(1,2,3)
+        }
+    return (inputs - np.mean(inputs, axes[rank], keepdims=True))/(np.std(inputs, axes[rank], keepdims=True) + 1e-32)
+    
+    
+    # def _standardization(x, axis=None):
+    #     if axis is None:
+    #         return (x - np.mean(x))/(np.std(x) + 1e-32)
+    #     else:
+    #         return (x - np.mean(x, axis, keepdims=True))/(np.std(x, axis, keepdims=True) + 1e-32)
+    # if rank == 2:
+    #     # [H,W] in real or complex type
+    #     return _standardization(inputs)
+    # elif rank == 3:
+    #     # only [H,W,C], [N,H,W] is NOT available
+    #     if shape[-1]%2:
+    #         # real type array
+    #         return _standardization(inputs)
+    #     else:
+    #         # complex type array
+    #         real = inputs[:,:,:shape[-1]//2]
+    #         imag = inputs[:,:,shape[-1]//2:]
+    #         real = _standardization(real)
+    #         imag = _standardization(imag)
+    #         return np.concatenate((real,imag),axis=-1)
+    # elif rank == 4:
+    #     if shape[-1]%2:
+    #         # real type array, e.g. [N,H,W,1]
+    #         return _standardization(inputs, axis=(1,2,3))
+    #     else:
+    #         # complex type array, e.g. [N,H,W,2]
+    #         real = inputs[:,:,:,:shape[-1]//2]
+    #         imag = inputs[:,:,:,shape[-1]//2:]
+    #         real = _standardization(real, axis=(1,2,3))
+    #         imag = _standardization(imag, axis=(1,2,3))
+    #         return np.concatenate((real, imag), axis=-1)
+    # else:
+    #     raise ValueError(f"Unrecognized data type with shape {shape}")
         
 def check_data_range(x):
     print(f"The maximum value is {np.max(x)} and the"
