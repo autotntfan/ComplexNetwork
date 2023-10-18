@@ -27,17 +27,17 @@ class AmplitudeMaxout(Layer):
             axis = -1
             shape[0] = -1
         if shape[axis]%2:
-            raise ValueError(f'nb of real/imaginary channel are inequivalent')
+            raise ValueError('nb of real/imaginary channel are inequivalent')
         num_channels = shape[-1]//2 # C//2
-        self.num_units = num_channels//self.num_pieces
+        num_units = num_channels//self.num_pieces
         # padding to the multiple of num_pieces
         if num_channels%self.num_pieces:
-            self.num_units += 1
+            num_units += 1
             num_padding = self.num_pieces - num_channels%self.num_pieces
             padding_size = tf.concat([tf.shape(x)[:-1],tf.constant([num_padding])],axis=-1)
             zero_padding = tf.zeros(padding_size)
         # shape = [N,H,W,units]
-        shape[axis] = self.num_units
+        shape[axis] = num_units
         # expand shape = [N,H,W,units,pieces]
         exp_shape = shape + [self.num_pieces]
         real_part = x[:,:,:,:num_channels]
@@ -52,13 +52,13 @@ class AmplitudeMaxout(Layer):
 
     def compute_output_shape(self, input_shape):
         shape = list(input_shape)
-        shape[-1] = 2*self.num_units
+        num_channels = shape[-1]//2 # C//2
+        shape[-1] = 2*(num_channels//self.num_pieces)
         return tuple(shape)
     
     def get_config(self):
         base_config = super(AmplitudeMaxout, self).get_config()
-        config = {'units': self.num_units,
-                  'pieces': self.num_pieces}
+        config = {'pieces': self.num_pieces}
         return dict(list(base_config.items()) + list(config.items()))
     
     def return_AMU(self, real_part, imag_part ,expand_shape):
@@ -256,8 +256,54 @@ class modReLU(Layer):
     
     def compute_output_shape(self, input_shape):
         return input_shape    
-#        
 
+class complexReLU(Layer):
+    '''
+    Unit-circle ReLU, z = a + bi
+    if |z| >= 1, f(Re{z}) = alpha*Re{z} and f(Im{z}) = alpha*Im{z}
+    else f(Re{z}) = Re{z} and f(Im{z}) = Im{z}
+    '''
+    def __init__(self, alpha=0.3, **kwargs):
+        super().__init__(**kwargs)
+        self.alpha = K.cast_to_floatx(alpha)
+        
+    def call(self, inputs):
+        real = get_realpart(inputs)
+        imag = get_imagpart(inputs)
+        modulus = tf.sqrt(tf.add(tf.pow(real,2),tf.pow(imag,2)))
+        mask_positive = tf.keras.backend.relu(modulus, 0, 1., 1.-K.epsilon())
+        '''
+        relu(x, alpha=0.0, max_value=None, threshold=0.0):
+            it follows:
+            `f(x) = max_value` for `x >= max_value`,
+            `f(x) = x` for `threshold <= x < max_value`,
+            `f(x) = alpha * (x - threshold)` otherwise.
+        '''
+        mask = tf.concat([mask_positive,mask_positive], axis=-1)
+        return tf.add(tf.multiply(self.alpha, tf.multiply(inputs,mask)), tf.multiply(tf.subtract(1.,mask), inputs))
+
+    def get_config(self):
+        base_config = super().get_config()
+        config = {'alpha': self.alpha}
+        return dict(list(base_config.items()) + list(config.items()))
+    
+    def compute_output_shape(self, input_shape):
+        return input_shape 
+
+class mish(Layer):
+    '''
+    Mish activation function
+    '''
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+    def call(self, x):
+        return x*tf.math.tanh(tf.nn.softplus(x))
+ 
+    
+    def compute_output_shape(self, input_shape):
+        return input_shape 
+    
 '''
     add custom functions to keras alias
     
@@ -274,5 +320,7 @@ get_custom_objects().update({'zReLU': zReLU(),
                              'cLeakyReLU': cLeakyReLU(),
                              'ctanh': ctanh(),
                              'modReLU': modReLU(),
-                             'FLeakyReLU': FLeakyReLU()})
+                             'FLeakyReLU': FLeakyReLU(),
+                             'complexReLU': complexReLU(),
+                             'mish': mish()})
 
