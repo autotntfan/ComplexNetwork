@@ -72,6 +72,7 @@ def conv2d_transpose(
                               data_format=data_format)
 
 
+
 def ifft(f):
     """Stub"""
     raise NotImplementedError(str(f))
