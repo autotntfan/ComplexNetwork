@@ -12,7 +12,7 @@ import numpy as np
 import scipy.signal as Signal
 from tensorflow.keras.utils import get_custom_objects
 from tensorflow.keras.losses import MeanSquaredError, MeanAbsoluteError
-
+import cv2
 PI = tf.constant(np.pi)
 
 def ComplexRMS(y_true, y_pred):
@@ -36,6 +36,10 @@ def ComplexMSE(y_true, y_pred):
     y_true, y_pred = _precheck(y_true, y_pred)
     return tf.reduce_mean(_get_square_error(y_true, y_pred))
 
+def MSE(y_true, y_pred):
+    y_true, y_pred = _precheck(y_true, y_pred)
+    return MeanSquaredError()(y_true, y_pred)
+
 def ComplexMAE(y_true, y_pred):
     '''
     ComplexMAE esitmates the mean-absolute error according to the
@@ -54,6 +58,9 @@ def ComplexMAE(y_true, y_pred):
     mae = tf.math.sqrt(_get_square_error(y_true, y_pred))
     return tf.reduce_mean(mae)
 
+def MAE(y_true, y_pred):
+    y_true, y_pred = _precheck(y_true, y_pred)
+    return MeanAbsoluteError()(y_true, y_pred)
 
 # def _feature_size(x):
 #     # to avoid the first unknown batch size, cannot use reshape(x,[-1]) to determine the nb of elements
@@ -99,7 +106,7 @@ def _precheck(y_true,y_pred):
         y_pred = tf.constant(y_pred, dtype=tf.float32)
     if y_true.shape.is_fully_defined():
         if not y_true.shape.is_compatible_with(y_pred.shape):
-            raise ValueError('Expected shape is ' + str(y_pred.shape[1:]) + ' but get ' + str(y_true.shape[1:]))
+            raise ValueError('Expected shape is ' + str(K.shape(y_true)[1:]) + ' but get ' + str(y_pred.shape[1:]))
 #        
 #    def _raise_error():
 #        raise ValueError('Expected shape is ' + str(K.shape(y_pred)[1:]) + ' but get ' + str(y_true.shape[1:]))
@@ -173,7 +180,7 @@ def _normalization(signal):
         real = get_realpart(signal)
         imag = get_imagpart(signal)
         normalized_target = (real**2 + imag**2)**0.5
-    ratio = tf.reduce_max(normalized_target,axis=(1,2,3),keepdims=True)
+    ratio = tf.reduce_max(normalized_target,axis=(1,2,3),keepdims=True) + 1e-32
     return tf.math.divide_no_nan(signal,ratio)
 
 def _angle(x):
@@ -257,32 +264,11 @@ def aSSIM_MSE(alpha):
         return alpha*ssim + (1-alpha)*mse
     return ssim_mse
 
-def _gauss2D(shape, sigma):
-    """ 
-    2D gaussian filter - should give the same result as:
-    MATLAB's fspecial('gaussian',[shape],[sigma]) 
-    """
-    if isinstance(shape, tuple) or isinstance(shape, list):
-        m,n = [(ss-1.)/2. for ss in shape]
-    else:
-        m = (shape-1.)/2.
-        n = (shape-1.)/2.
-    y,x = np.ogrid[-m:m+1,-n:n+1]
-    h = np.exp( -(x*x + y*y) / (2.*sigma*sigma) )
-    h.astype('float32')
-    h[ h < np.finfo(h.dtype).eps*h.max() ] = 0
-    sumh = h.sum()
-    if sumh != 0:
-        h /= sumh
-    h = h*2.0
-    h = h.astype('float32')
-    return h
-
 def ssim_map(max_val=2, filter_size=15, filter_sigma=1.5, k1=0.01, k2=0.03):
     def tf_ssim_map(y_true,y_pred):
         y_true, y_pred = _precheck(y_true, y_pred)
         y_pred = _normalization(y_pred)
-        kernelX = _gauss2D(filter_size, filter_sigma)
+        kernelX = cv2.getGaussianKernel(filter_size, filter_sigma)
         window = np.rot90(kernelX * kernelX.T,2)
         window = window.reshape(filter_size,filter_size,1,1)
         window = tf.cast(window, dtype=tf.float32)
@@ -308,9 +294,21 @@ def ssim_map(max_val=2, filter_size=15, filter_sigma=1.5, k1=0.01, k2=0.03):
         minssim = tf.reduce_min(ssimmap)
         return minssim
     return tf_ssim_map
-
+def wMSE(map_):
+    def mse(y_true,y_pred):
+        y_true, y_pred = _precheck(y_true, y_pred)
+        real_pdt = get_realpart(y_pred)
+        imag_pdt = get_imagpart(y_pred)
+        real_true = get_realpart(y_true)
+        imag_true = get_imagpart(y_true)
+        # squared_error = (y_hat_real - y_real)**2 + (y_hat_imag - y_imag)**2
+        SE = map_*(real_pdt - real_true)**2 + map_*(imag_pdt - imag_true)**2
+        return tf.reduce_mean(SE)
+    return mse
+    
 get_custom_objects().update({'SSIM': SSIM,
                              'MS_SSIM': MS_SSIM,
                              'SSIM_MSE': SSIM_MSE,
                              'aSSIM_MSE': aSSIM_MSE,
-                             'SSIM_map': ssim_map})
+                             'SSIM_map': ssim_map,
+                             'wMSE': wMSE})
