@@ -27,7 +27,7 @@ import complexnn
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
-def isrf(signal, hasN=True):
+def isrf(signals, hasN=True):
     '''
     This function is used to check the input "signal" is RF data. Data format must be in real.
     Allow data shape includes:
@@ -39,26 +39,26 @@ def isrf(signal, hasN=True):
     *real format NHC is difficult to be recognized to NHW or NHC, so this shape is deprecated.
     '''
     # check signal is in real data format
-    if np.issubdtype(signal, np.complexfloating):
+    if np.issubdtype(signals.dtype, np.complexfloating):
         return False
-    rank = signal.ndim
+    rank = signals.ndim
     if rank == 4 and hasN:
-        if signal.shape[-1]%2:
+        if signals.shape[-1]%2:
             return True # [N,H,W,C] -> RF data
         else:
             return False # [N,H,W,C] -> BB data
     if rank == 3:
         if hasN:
             return True # [N,H,W] -> RF data
-        if signal.shape[-1]%2:
+        if signals.shape[-1]%2:
             return True # [H,W,C] -> RF data
         else:
             return False # [H,W,C] -> BB data
     if rank in {1,2}:
         return True # [H,W] or [N,H] -> RF data
-    raise ValueError(f'Signal shape is unsupported with shape {signal.shape}')
+    raise ValueError(f'Signal shape is unsupported with shape {signals.shape}')
 
-def isbb(signal, hasN=True):
+def isbb(signals, hasN=True):
     '''
     This function is used to check the input "signal" is BB data. Data format can be in complex or real.
     Allow data shape includes:
@@ -68,7 +68,20 @@ def isbb(signal, hasN=True):
         2-D             NH.HW            NH (RF data).HW (RF data)
         1-D               H                      H (RF data)
     '''
-    return not isrf(signal, hasN)          
+    return not isrf(signals, hasN)
+
+def check_format(signals, hasN, format_):
+    format_ = format_.upper()
+    if format_ == 'RF':
+        if isbb(signals, hasN):
+            raise ValueError("Input signal is BB data")
+        return signals
+    if format_ == 'BB':
+        if isrf(signals, hasN):
+            raise ValueError("Input signal is RF data")
+        signals = data_utils.convert_to_complex(signals)
+        return signals
+    raise ValueError(f"`format_` should be either RF or BB but get {format_}")
 
 def get_shape(img, hasN, key=None):
     '''
@@ -111,18 +124,22 @@ def get_shape(img, hasN, key=None):
     return shape[axis]
     
 
-def get_custom_object():
+def get_custom_object():    
     custom_object = {
         'ComplexConv2D':complexnn.conv_test.ComplexConv2D,
         'ComplexBatchNormalization':complexnn.bn_test.ComplexBatchNormalization,
-        'MaxPoolingWithArgmax2D':complexnn.pool_test.MaxPoolingWithArgmax2D,
+        'MaxPoolingWithArgmax2D':complexnn.pool_test.ComplexMaxPoolingWithArgmax2D,
         'MaxUnpooling2D':complexnn.pool_test.MaxUnpooling2D,
         'ComplexMSE':complexnn.loss.ComplexMSE,
         'ctanh':complexnn.activation.ctanh,
         'FLeakyReLU': complexnn.activation.FLeakyReLU,
+        'modReLU':complexnn.activation.modReLU,
+        'AmplitudeMaxout':complexnn.activation.AmplitudeMaxout,
         'ComplexConcatenate': ComplexConcatenate,
         'ComplexNormalization': ComplexNormalization,
-        'CosineDecay': CosineDecay
+        'CosineDecay': CosineDecay,
+        'mish':complexnn.activation.mish,
+        'wMSE':complexnn.loss.wMSE
         }
     return custom_object
 
@@ -195,41 +212,51 @@ def get_data(ind, key):
         data = io.loadmat(file_path) # reading file gets information
         return data.get(key)
 
-def get_axis(img, ind):
+def get_axis(ind, focus=False, file_name='parameters.txt'):
     '''
     Getting the physical axis or smapling rate. obtain the
     information about depth, dx, dz, or even sampling rate.
         Args: 
-            img: A numpy array. 
             ind: An integer, the index of image.
-            fs: Boolean.
+            focus: Boolean, whether the axis requires focusing.
+            file_name: string, cache filter name.
         Returns:
             image axis if fs is false, otherwise the sampling rate.
     '''
-    img = data_utils.precheck_dim(img)
-    H, W = img.shape[1:-1]
-    dx = get_data(ind, 'dx') * (constant.DATASIZE[2]/W)
-    dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/H)
-    depth = get_data(ind, 'depth')
-    x_axis = np.linspace(0,dx*W-dx,W) * 1e3 # [mm]
-    z_axis = np.linspace(0,dz*H-dz,H) * 1e3 + depth * 1e3 # [mm]
+    info = read_info(file_name, constant.CACHEPATH)
+    shape = info['data_shape']
+    H, W, *_ = shape
+    dx = float(get_data(ind, 'dx')/(constant.DATASIZE[2]/W))
+    dz = float(get_data(ind, 'dz')/(constant.DATASIZE[1]/H))
+    depth = float(get_data(ind, 'depth'))
+    x_axis = np.linspace(0,dx*W-dx,int(W)) * 1e3 # [mm]
+    z_axis = np.linspace(0,dz*H-dz,int(H)) * 1e3 + depth * 1e3 # [mm]
+    if focus:
+        x_axis = data_utils.focusing(x_axis, hasN=False)
+        z_axis = data_utils.focusing(z_axis, hasN=False)
     xmin, xmax = (np.min(x_axis), np.max(x_axis))
     zmin, zmax = (np.min(z_axis), np.max(z_axis))
     return (xmin, xmax, zmax, zmin)
 
-def get_sampling_rate(img, ind, hasN):
+def get_sampling_rate(H, ind, focus=True, file_name='parameters.txt'):
     '''
     Find its sampling rate.
     ----------
     Arg:
-        img: ndarray, the i-th simulation data
-        ind: int, the i-th simulation data
+        H: int, length of signal.
+        ind: int, the i-th simulation data.
+        focus: boolean, whether the signal is focused.
+        file_name: string, cache filter name.
     Return:
         floating scalar, sampling rate
         
     '''
-    H = get_shape(img, hasN, 'H')
-    dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/H)
+    if focus: # focusing does not effect the sampling interval
+        info = read_info(file_name, constant.CACHEPATH)
+        shape = info['data_shape']
+        dz = get_data(ind, 'dz') * (constant.DATASIZE[1]/shape[0])
+    else:
+        dz = get_data(ind, 'dz')*constant.DATASIZE[1]/H
     return 1/(2*dz/constant.SOUNDV).reshape([-1])
     
 def get_delaycurve(ind):
@@ -246,7 +273,7 @@ def get_delaycurve(ind):
     # obtain delay profile
     try:
         delay = get_data(ind, 'delay_curve')
-        return delay # unit in pi
+        return np.squeeze(delay) # unit in pi
     except TypeError:
         return 0
     
